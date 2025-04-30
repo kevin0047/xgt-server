@@ -70,6 +70,10 @@ public:
     void DisconnectPLC();
     afx_msg void OnBnClickedButtonConnectPlc();
 public:
+    BOOL WriteIndicatorValueToPLC(int indicatorIndex);
+    BOOL ReadCommandFromPLCToIndicator(int indicatorIndex);
+    BOOL SendCommandToIndicator(int indicatorIndex, WORD command);
+    BOOL ResetPLCCommand(int indicatorIndex);
     CMy0430MFCAppDlg(CWnd* pParent = nullptr);	// 표준 생성자입니다.
     virtual ~CMy0430MFCAppDlg();
 
@@ -139,6 +143,10 @@ protected:
 
     DECLARE_MESSAGE_MAP()
 private:
+
+    int m_nCurrentOperation;   // 현재 실행 중인 작업 번호 (0-23)
+    BOOL ExecuteSequentialOperation(); // 순차 작업 실행 함수
+
     CModbusTcpSocket m_plcSocket; // PLC 전용 소켓
 };
 
