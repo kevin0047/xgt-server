@@ -81,10 +81,14 @@ protected:
     CButton m_btnStopPolling;        // 폴링 중지 버튼
     CListBox m_logList;              // 로그 표시용 리스트 박스
 
-    std::vector<IndicatorInfo> m_indicators;    // 인디케이터 정보
-    int m_delayMs;                              // 통신 딜레이(ms)
-    bool m_bPolling;                            // 폴링 중 여부
-    UINT_PTR m_timerId;                         // 타이머 ID
+    // 고정 크기 배열로 변경
+    static const int MAX_INDICATORS = 30;  // 최대 연결 개수
+    IndicatorInfo m_indicators[MAX_INDICATORS];
+    int m_indicatorCount;                 // 실제 사용 중인 인디케이터 개수
+
+    int m_delayMs;                        // 통신 딜레이(ms)
+    bool m_bPolling;                      // 폴링 중 여부
+    UINT_PTR m_timerId;                   // 타이머 ID
 
     // 인디케이터 CSV 파일 읽기
     BOOL LoadIndicatorSettings(const CString& filePath);

@@ -82,6 +82,7 @@ CMy0430MFCAppDlg::CMy0430MFCAppDlg(CWnd* pParent /*=nullptr*/)
     , m_delayMs(1000) // 기본 딜레이 1초
     , m_bPolling(false)
     , m_timerId(0)
+    , m_indicatorCount(0) // 추가된 초기화
 {
     m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 }
@@ -93,7 +94,7 @@ CMy0430MFCAppDlg::~CMy0430MFCAppDlg()
         KillTimer(m_timerId);
 
     // 소켓 연결 해제
-    for (size_t i = 0; i < m_indicators.size(); i++)
+    for (size_t i = 0; i < m_indicatorCount; i++)
     {
         if (m_indicators[i].connected)
             DisconnectIndicator(i);
@@ -219,19 +220,20 @@ BOOL CMy0430MFCAppDlg::LoadIndicatorSettings(const CString& filePath)
         return FALSE;
     }
 
-    m_indicators.clear();
+    // m_indicators.clear(); 대신 카운트 초기화
+    m_indicatorCount = 0;
 
     std::string line;
     // 헤더 라인 건너뛰기
     std::getline(file, line);
 
     // 인디케이터 정보 읽기
-    while (std::getline(file, line)) {
+    while (std::getline(file, line) && m_indicatorCount < MAX_INDICATORS) {
         std::istringstream iss(line);
         std::string ip, port;
 
         if (std::getline(iss, ip, ',') && std::getline(iss, port, ',')) {
-            IndicatorInfo info;
+            IndicatorInfo& info = m_indicators[m_indicatorCount];
             info.ip = CString(ip.c_str());
             info.port = std::stoi(port);
             info.connected = false;
@@ -245,19 +247,19 @@ BOOL CMy0430MFCAppDlg::LoadIndicatorSettings(const CString& filePath)
 
             // 소켓 초기화
             info.socket.SetParent(this);
-            info.socket.SetSocketID(m_indicators.size()); // 인덱스를 소켓 ID로 사용
+            info.socket.SetSocketID(m_indicatorCount); // 인덱스를 소켓 ID로 사용
 
-            m_indicators.push_back(info);
+            m_indicatorCount++;
         }
     }
 
-    return !m_indicators.empty();
+    return m_indicatorCount > 0;
 }
 
 // 인디케이터 연결
 BOOL CMy0430MFCAppDlg::ConnectToIndicator(int index)
 {
-    if (index < 0 || index >= (int)m_indicators.size()) {
+    if (index < 0 || index >= (int)m_indicatorCount) {
         return FALSE;
     }
 
@@ -300,7 +302,7 @@ BOOL CMy0430MFCAppDlg::ConnectToIndicator(int index)
 // 인디케이터 연결 해제
 void CMy0430MFCAppDlg::DisconnectIndicator(int index)
 {
-    if (index < 0 || index >= (int)m_indicators.size()) {
+    if (index < 0 || index >= (int)m_indicatorCount) {
         return;
     }
 
@@ -319,7 +321,7 @@ void CMy0430MFCAppDlg::DisconnectIndicator(int index)
 // ModBus TCP를 통한 인디케이터 데이터 읽기
 BOOL CMy0430MFCAppDlg::ReadIndicatorData(int index)
 {
-    if (index < 0 || index >= (int)m_indicators.size() || !m_indicators[index].connected) {
+    if (index < 0 || index >= (int) m_indicatorCount || !m_indicators[index].connected) {
         return FALSE;
     }
 
@@ -366,7 +368,7 @@ void CMy0430MFCAppDlg::UpdateListControl()
 {
     m_listIndicators.DeleteAllItems();
 
-    for (size_t i = 0; i < m_indicators.size(); ++i) {
+    for (size_t i = 0; i < m_indicatorCount; ++i) {
         const IndicatorInfo& indicator = m_indicators[i];
 
         CString strIndex;
@@ -413,7 +415,7 @@ void CMy0430MFCAppDlg::OnTimer(UINT_PTR nIDEvent)
 {
     if (m_timerId == nIDEvent) {
         // 모든 연결된 인디케이터에 데이터 요청
-        for (int i = 0; i < (int)m_indicators.size(); ++i) {
+        for (int i = 0; i < (int)m_indicatorCount; ++i) {
             if (m_indicators[i].connected) {
                 ReadIndicatorData(i);
             }
@@ -434,7 +436,7 @@ void CMy0430MFCAppDlg::OnBnClickedButtonConnect()
 
     // 모든 인디케이터 연결
     bool allConnected = true;
-    for (int i = 0; i < (int)m_indicators.size(); ++i) {
+    for (int i = 0; i < (int)m_indicatorCount; ++i) {
         if (!ConnectToIndicator(i)) {
             allConnected = false;
         }
@@ -450,7 +452,7 @@ void CMy0430MFCAppDlg::OnBnClickedButtonConnect()
 void CMy0430MFCAppDlg::OnBnClickedButtonDisconnect()
 {
     // 모든 인디케이터 연결 해제
-    for (int i = 0; i < (int)m_indicators.size(); ++i) {
+    for (int i = 0; i < (int)m_indicatorCount; ++i) {
         DisconnectIndicator(i);
     }
 
@@ -523,7 +525,7 @@ void CMy0430MFCAppDlg::OnClose()
     }
 
     // 모든 인디케이터 연결 해제
-    for (int i = 0; i < (int)m_indicators.size(); ++i) {
+    for (int i = 0; i < (int)m_indicatorCount; ++i) {
         DisconnectIndicator(i);
     }
 
@@ -536,7 +538,7 @@ LRESULT CMy0430MFCAppDlg::OnSocketConnect(WPARAM wParam, LPARAM lParam)
     int nSocketID = (int)wParam;
     int nErrorCode = (int)lParam;
 
-    if (nSocketID >= 0 && nSocketID < (int)m_indicators.size()) {
+    if (nSocketID >= 0 && nSocketID < (int)m_indicatorCount) {
         IndicatorInfo& indicator = m_indicators[nSocketID];
 
         if (nErrorCode == 0) {
@@ -568,7 +570,7 @@ LRESULT CMy0430MFCAppDlg::OnSocketReceive(WPARAM wParam, LPARAM lParam)
     int nSocketID = (int)wParam;
     int nBytesAvailable = (int)lParam;
 
-    if (nSocketID >= 0 && nSocketID < (int)m_indicators.size()) {
+    if (nSocketID >= 0 && nSocketID < (int)m_indicatorCount) {
         IndicatorInfo& indicator = m_indicators[nSocketID];
         std::vector<BYTE>& buffer = indicator.socket.m_RecvBuffer;
 
@@ -638,7 +640,7 @@ LRESULT CMy0430MFCAppDlg::OnSocketClose(WPARAM wParam, LPARAM lParam)
 {
     int nSocketID = (int)wParam;
 
-    if (nSocketID >= 0 && nSocketID < (int)m_indicators.size()) {
+    if (nSocketID >= 0 && nSocketID < (int)m_indicatorCount) {
         IndicatorInfo& indicator = m_indicators[nSocketID];
 
         if (indicator.connected) {
