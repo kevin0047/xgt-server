@@ -58,6 +58,17 @@ struct IndicatorInfo {
 class CMy0430MFCAppDlg : public CDialogEx
 {
     // 생성입니다.
+
+public:
+    CStatic m_staticPLCStatus;// PLC 상태 표시용 static 컨트롤
+    CString m_strPLCIP;   // PLC IP 주소
+    int m_nPLCPort;       // PLC 포트
+    CEdit m_editPLCIP;    // IP 입력 컨트롤
+    CEdit m_editPLCPort;  // 포트 입력 컨트롤
+
+    BOOL ConnectToPLC(const CString& ipAddress, int port);
+    void DisconnectPLC();
+    afx_msg void OnBnClickedButtonConnectPlc();
 public:
     CMy0430MFCAppDlg(CWnd* pParent = nullptr);	// 표준 생성자입니다.
     virtual ~CMy0430MFCAppDlg();
@@ -71,6 +82,7 @@ protected:
     virtual void DoDataExchange(CDataExchange* pDX);	// DDX/DDV 지원입니다.
 
     // 구현입니다.
+
 protected:
     HICON m_hIcon;
     CListCtrl m_listIndicators;      // 인디케이터 데이터 표시용 리스트 컨트롤
@@ -126,4 +138,7 @@ protected:
     afx_msg LRESULT OnSocketClose(WPARAM wParam, LPARAM lParam);
 
     DECLARE_MESSAGE_MAP()
+private:
+    CModbusTcpSocket m_plcSocket; // PLC 전용 소켓
 };
+

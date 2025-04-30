@@ -12,6 +12,10 @@
 #define IDC_BUTTON_STOP_POLLING         1005
 #define IDC_LIST_LOG                    1006
 #define IDC_BUTTON_CLEAR_LOG            1007
+#define IDC_EDIT_PLC_IP                  1008
+#define IDC_EDIT_PLC_PORT               1009
+#define IDC_BUTTON_CONNECT_PLC          1010
+#define IDC_STATIC_PLC_STATUS			1011
 
 // 다음은 새 개체에 사용할 기본값입니다.
 //

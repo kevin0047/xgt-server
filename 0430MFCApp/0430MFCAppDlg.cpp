@@ -57,6 +57,7 @@ void CModbusTcpSocket::OnReceive(int nErrorCode)
 
 void CModbusTcpSocket::OnClose(int nErrorCode)
 {
+
     m_bConnected = false;
     m_pParent->PostMessage(WM_SOCKET_CLOSE, m_nSocketID, nErrorCode);
     CAsyncSocket::OnClose(nErrorCode);
@@ -82,7 +83,9 @@ CMy0430MFCAppDlg::CMy0430MFCAppDlg(CWnd* pParent /*=nullptr*/)
     , m_delayMs(1000) // 기본 딜레이 1초
     , m_bPolling(false)
     , m_timerId(0)
-    , m_indicatorCount(0) // 추가된 초기화
+    , m_indicatorCount(0)
+    , m_strPLCIP(_T("127.0.0.1"))  // PLC IP 초기화
+    , m_nPLCPort(5020)       // PLC 포트 초기화
 {
     m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 }
@@ -112,6 +115,11 @@ void CMy0430MFCAppDlg::DoDataExchange(CDataExchange* pDX)
     DDX_Control(pDX, IDC_BUTTON_STOP_POLLING, m_btnStopPolling);
     DDX_Control(pDX, IDC_LIST_LOG, m_logList);
     DDX_Text(pDX, IDC_EDIT_DELAY, m_delayMs);
+    DDX_Text(pDX, IDC_EDIT_PLC_IP, m_strPLCIP);
+    DDX_Text(pDX, IDC_EDIT_PLC_PORT, m_nPLCPort);
+    DDX_Control(pDX, IDC_EDIT_PLC_IP, m_editPLCIP);
+    DDX_Control(pDX, IDC_EDIT_PLC_PORT, m_editPLCPort);
+    DDX_Control(pDX, IDC_STATIC_PLC_STATUS, m_staticPLCStatus);
 }
 
 BEGIN_MESSAGE_MAP(CMy0430MFCAppDlg, CDialogEx)
@@ -127,6 +135,8 @@ BEGIN_MESSAGE_MAP(CMy0430MFCAppDlg, CDialogEx)
     ON_MESSAGE(WM_SOCKET_CONNECT, &CMy0430MFCAppDlg::OnSocketConnect)
     ON_MESSAGE(WM_SOCKET_RECEIVE, &CMy0430MFCAppDlg::OnSocketReceive)
     ON_MESSAGE(WM_SOCKET_CLOSE, &CMy0430MFCAppDlg::OnSocketClose)
+    ON_BN_CLICKED(IDC_BUTTON_CONNECT_PLC, &CMy0430MFCAppDlg::OnBnClickedButtonConnectPlc)
+
 END_MESSAGE_MAP()
 
 // CMy0430MFCAppDlg 메시지 처리기
@@ -172,6 +182,8 @@ BOOL CMy0430MFCAppDlg::OnInitDialog()
 
     // 초기 로그
     AddLog(_T("인디케이터 통신 프로그램이 시작되었습니다."));
+    // PLC 상태 초기화
+    m_staticPLCStatus.SetWindowText(_T("PLC 상태: 연결 안됨"));
 
     return TRUE;  // 포커스를 컨트롤에 설정하지 않으면 TRUE를 반환합니다.
 }
@@ -538,6 +550,21 @@ LRESULT CMy0430MFCAppDlg::OnSocketConnect(WPARAM wParam, LPARAM lParam)
     int nSocketID = (int)wParam;
     int nErrorCode = (int)lParam;
 
+    // PLC 소켓 연결 처리 (ID가 999인 경우)
+    if (nSocketID == 999) {
+        if (nErrorCode == 0) {
+            // PLC 연결 성공
+            m_staticPLCStatus.SetWindowText(_T("PLC 상태: 연결됨"));
+            AddLog(_T("PLC 연결 성공"));
+        }
+        else {
+            // PLC 연결 실패
+            m_staticPLCStatus.SetWindowText(_T("PLC 상태: 연결 실패"));
+            AddLog(_T("PLC 연결 실패"));
+        }
+        return 0;
+    }
+
     if (nSocketID >= 0 && nSocketID < (int)m_indicatorCount) {
         IndicatorInfo& indicator = m_indicators[nSocketID];
 
@@ -639,7 +666,12 @@ LRESULT CMy0430MFCAppDlg::OnSocketReceive(WPARAM wParam, LPARAM lParam)
 LRESULT CMy0430MFCAppDlg::OnSocketClose(WPARAM wParam, LPARAM lParam)
 {
     int nSocketID = (int)wParam;
-
+    // PLC 소켓 종료 처리
+    if (nSocketID == 999) {
+        m_staticPLCStatus.SetWindowText(_T("PLC 상태: 연결 안됨"));
+        AddLog(_T("PLC 연결이 종료되었습니다."));
+        return 0;
+    }
     if (nSocketID >= 0 && nSocketID < (int)m_indicatorCount) {
         IndicatorInfo& indicator = m_indicators[nSocketID];
 
@@ -680,7 +712,7 @@ void CMy0430MFCAppDlg::AddLog(LPCTSTR pszPrefix, const BYTE* pData, int nLength)
     int nMaxDisplay = min(nLength, 32);
     for (int i = 0; i < nMaxDisplay; i++) {
         strTemp.Format(_T("%02X "), pData[i]);
-        strLog += strTemp;
+        strLog += strTemp; 
     }
 
     if (nLength > nMaxDisplay)
@@ -757,4 +789,91 @@ CString CMy0430MFCAppDlg::AnalyzeModbusPacket(const BYTE* pData, int nLength)
     }
 
     return strResult;
+}
+
+// PLC 연결 함수
+BOOL CMy0430MFCAppDlg::ConnectToPLC(const CString& ipAddress, int port)
+{
+    // 이미 연결되어 있다면 연결 해제
+    if (m_plcSocket.IsConnected()) {
+        DisconnectPLC();
+    }
+
+    // 소켓 초기화 전에 부모와 ID 설정
+    m_plcSocket.SetParent(this);
+    m_plcSocket.SetSocketID(999);  // PLC 소켓용 특별 ID
+
+    // 소켓 생성
+    if (!m_plcSocket.Create()) {
+        CString strError;
+        strError.Format(_T("PLC %s:%d 소켓 생성 실패: 오류 코드 %d"),
+            ipAddress, port, GetLastError());
+        AddLog(strError);
+        return FALSE;
+    }
+
+    // PLC 연결 시도
+    if (!m_plcSocket.Connect(ipAddress, port)) {
+        int nError = GetLastError();
+        if (nError != WSAEWOULDBLOCK) {
+            CString strError;
+            strError.Format(_T("PLC %s:%d 연결 실패: 오류 코드 %d"),
+                ipAddress, port, nError);
+            AddLog(strError);
+            m_plcSocket.Close();
+            return FALSE;
+        }
+    }
+
+    CString strLog;
+    strLog.Format(_T("PLC %s:%d 연결을 시도합니다..."), ipAddress, port);
+    AddLog(strLog);
+    return TRUE;
+}
+void CMy0430MFCAppDlg::DisconnectPLC()
+{
+    if (m_plcSocket.IsConnected()) {
+        m_plcSocket.Close();
+        m_staticPLCStatus.SetWindowText(_T("PLC 상태: 연결 안됨"));
+        AddLog(_T("PLC 연결이 해제되었습니다."));
+    }
+}
+void CMy0430MFCAppDlg::OnBnClickedButtonConnectPlc()
+{
+    UpdateData(TRUE); // 컨트롤 데이터를 변수로 가져오기
+
+    // 입력값 검증
+    if (m_strPLCIP.IsEmpty())
+    {
+        AfxMessageBox(_T("PLC IP 주소를 입력하세요."));
+        m_editPLCIP.SetFocus();
+        return;
+    }
+
+    if (m_nPLCPort <= 0 || m_nPLCPort > 65535)
+    {
+        AfxMessageBox(_T("올바른 포트 번호를 입력하세요(1-65535)."));
+        m_editPLCPort.SetFocus();
+        return;
+    }
+
+    try {
+        // PLC 연결 시도
+        if (ConnectToPLC(m_strPLCIP, m_nPLCPort))
+        {
+            CString strLog;
+            strLog.Format(_T("PLC %s:%d 연결을 시도합니다..."), m_strPLCIP, m_nPLCPort);
+            AddLog(strLog);
+        }
+        else
+        {
+            AddLog(_T("PLC 연결 시도 실패"));
+        }
+    }
+    catch (CException* e) {
+        TCHAR szError[1024];
+        e->GetErrorMessage(szError, 1024);
+        AddLog(szError);
+        e->Delete();
+    }
 }
