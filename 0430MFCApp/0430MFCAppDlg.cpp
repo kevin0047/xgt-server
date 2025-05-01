@@ -84,8 +84,8 @@ CMy0430MFCAppDlg::CMy0430MFCAppDlg(CWnd* pParent /*=nullptr*/)
     , m_bPolling(false)
     , m_timerId(0)
     , m_indicatorCount(0)
-    , m_strPLCIP(_T("127.0.0.1"))  // PLC IP 초기화
-    , m_nPLCPort(5020)       // PLC 포트 초기화
+    , m_strPLCIP(_T("192.168.250.111"))  // PLC IP 초기화
+    , m_nPLCPort(2004)       // PLC 포트 초기화
 {
     m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 }
@@ -789,15 +789,70 @@ BOOL CMy0430MFCAppDlg::ResetPLCCommand(int indicatorIndex)
     return TRUE;
 }
 // 소켓 연결 종료 메시지 처리
+// 소켓 연결 종료 메시지 처리
 LRESULT CMy0430MFCAppDlg::OnSocketClose(WPARAM wParam, LPARAM lParam)
 {
     int nSocketID = (int)wParam;
+    int nErrorCode = (int)lParam;
+
+    // 에러 코드에 따른 원인 문자열
+    CString strErrorReason;
+
+    // 에러 코드 분석
+    switch (nErrorCode)
+    {
+    case 0:
+        strErrorReason = _T("정상 종료");
+        break;
+    case WSAECONNABORTED:
+        strErrorReason = _T("연결 중단됨 (소프트웨어로 인한 연결 중단)");
+        break;
+    case WSAECONNRESET:
+        strErrorReason = _T("연결 리셋됨 (원격 호스트에 의해 강제 종료)");
+        break;
+    case WSAEHOSTUNREACH:
+        strErrorReason = _T("목적지 호스트에 도달할 수 없음");
+        break;
+    case WSAENETDOWN:
+        strErrorReason = _T("네트워크 다운됨");
+        break;
+    case WSAENETRESET:
+        strErrorReason = _T("네트워크 연결이 리셋됨");
+        break;
+    case WSAETIMEDOUT:
+        strErrorReason = _T("연결 시간 초과");
+        break;
+    default:
+        strErrorReason.Format(_T("알 수 없는 오류 코드: %d"), nErrorCode);
+        break;
+    }
+
     // PLC 소켓 종료 처리
     if (nSocketID == 999) {
+        CString strLog;
+        strLog.Format(_T("PLC 연결이 종료되었습니다. 원인: %s"), strErrorReason);
+        AddLog(strLog);
+
+        // 소켓 객체 상태는 이미 CModbusTcpSocket::OnClose에서 업데이트됨
+        // (m_bConnected = false)
+
+        // UI 업데이트
         m_staticPLCStatus.SetWindowText(_T("PLC 상태: 연결 안됨"));
-        AddLog(_T("PLC 연결이 종료되었습니다."));
+
+        // 연결이 비정상적으로 끊긴 경우 WSAGetLastError로 추가 정보 확인
+        if (nErrorCode != 0) {
+            int nWSAError = WSAGetLastError();
+            if (nWSAError != 0) {
+                CString strWSAError;
+                strWSAError.Format(_T("WSA 에러 코드: %d"), nWSAError);
+                AddLog(strWSAError);
+            }
+        }
+
         return 0;
     }
+
+    // 인디케이터 소켓 종료 처리
     if (nSocketID >= 0 && nSocketID < (int)m_indicatorCount) {
         IndicatorInfo& indicator = m_indicators[nSocketID];
 
@@ -805,8 +860,17 @@ LRESULT CMy0430MFCAppDlg::OnSocketClose(WPARAM wParam, LPARAM lParam)
             indicator.connected = false;
 
             CString strLog;
-            strLog.Format(_T("인디케이터 %s:%d 연결 종료됨"), indicator.ip, indicator.port);
+            strLog.Format(_T("인디케이터 %s:%d 연결 종료됨. 원인: %s"),
+                indicator.ip, indicator.port, strErrorReason);
             AddLog(strLog);
+
+            // 네트워크 관련 추가 오류 정보 확인
+            int nWSAError = WSAGetLastError();
+            if (nWSAError != 0) {
+                CString strWSAError;
+                strWSAError.Format(_T("인디케이터 %d WSA 에러 코드: %d"), nSocketID + 1, nWSAError);
+                AddLog(strWSAError);
+            }
 
             // UI 업데이트
             UpdateListControl();
@@ -939,10 +1003,13 @@ BOOL CMy0430MFCAppDlg::ConnectToPLC(const CString& ipAddress, int port)
     }
 
     // 연결 타임아웃 설정
-    int timeout = 100; 
+    int timeout = 1000; 
     m_plcSocket.SetSockOpt(SO_SNDTIMEO, &timeout, sizeof(timeout));
     m_plcSocket.SetSockOpt(SO_RCVTIMEO, &timeout, sizeof(timeout));
-
+    int rcvBufSize = 8192; // 수신 버퍼 크기 증가
+    int sndBufSize = 8192; // 송신 버퍼 크기 증가
+    m_plcSocket.SetSockOpt(SO_RCVBUF, &rcvBufSize, sizeof(rcvBufSize));
+    m_plcSocket.SetSockOpt(SO_SNDBUF, &sndBufSize, sizeof(sndBufSize));
     // PLC 연결 시도
     if (!m_plcSocket.Connect(ipAddress, port)) {
         int nError = GetLastError();
@@ -1180,52 +1247,57 @@ BOOL CMy0430MFCAppDlg::SendCommandToIndicator(int indicatorIndex, WORD command)
 }
 BOOL CMy0430MFCAppDlg::ExecuteSequentialOperation()
 {
+    // 연결된 인디케이터 수에 맞게 최대 작업 수 계산
+    int maxOperations = m_indicatorCount * 2;  // 각 인디케이터 당 2개 작업(읽기/쓰기)
+
+    // 작업 번호가 최대 작업 수를 초과하면 초기화
+    if (m_nCurrentOperation >= maxOperations) {
+        m_nCurrentOperation = 0;
+    }
+
     // 작업 번호에 따라 인디케이터 인덱스와 작업 유형 계산
     int indicatorIndex = m_nCurrentOperation / 2;  // 0, 0, 1, 1, 2, 2, ...
     bool isReadCommand = (m_nCurrentOperation % 2) != 0;  // 홀수면 명령 읽기, 짝수면 측정값 쓰기
 
-    // 유효한 인디케이터 인덱스 확인
-    if (indicatorIndex < m_indicatorCount) {
-        // PLC 연결 상태 먼저 확인
-        if (!m_plcSocket.IsConnected() && m_bPolling) {
-            // PLC 재연결 시도
-            CString strLog;
-            strLog.Format(_T("PLC 연결이 끊어짐. 재연결 시도: %s:%d"), m_strPLCIP, m_nPLCPort);
-            AddLog(strLog);
-            ConnectToPLC(m_strPLCIP, m_nPLCPort);
+    // PLC 연결 상태 먼저 확인
+    if (!m_plcSocket.IsConnected() && m_bPolling) {
+        // PLC 재연결 시도
+        CString strLog;
+        strLog.Format(_T("PLC 연결이 끊어짐. 재연결 시도: %s:%d"), m_strPLCIP, m_nPLCPort);
+        AddLog(strLog);
+        ConnectToPLC(m_strPLCIP, m_nPLCPort);
 
-            // 다음 작업으로 넘어가고 이번 작업은 건너뜀
-            m_nCurrentOperation = (m_nCurrentOperation + 1) % 24;
-            return TRUE;
-        }
-
-        if (m_indicators[indicatorIndex].connected) {
-            if (isReadCommand) {
-                // PLC에서 명령 읽어서 인디케이터로 전송
-                if (!ReadCommandFromPLCToIndicator(indicatorIndex)) {
-                    // 실패 시 무시하고 넘어감
-                }
-            }
-            else {
-                // 인디케이터 측정값을 PLC에 쓰기 전에 데이터 읽기
-                if (!ReadIndicatorData(indicatorIndex)) {
-                    // 데이터 읽기 실패 시, 인디케이터 연결 확인
-                    if (!m_indicators[indicatorIndex].connected && m_bPolling) {
-                        ConnectToIndicator(indicatorIndex);
-                    }
-                }
-                // WriteIndicatorValueToPLC는 ReadIndicatorData의 응답 처리에서 호출하도록 함
-                // 즉, 여기서는 직접 호출하지 않음
-            }
-        }
-        else if (m_bPolling) {
-            // 연결되지 않은 인디케이터 연결 시도
-            ConnectToIndicator(indicatorIndex);
-        }
+        // 다음 작업으로 넘어가고 이번 작업은 건너뜀
+        m_nCurrentOperation = (m_nCurrentOperation + 1) % maxOperations;
+        return TRUE;
     }
 
-    // 다음 작업으로 이동
-    m_nCurrentOperation = (m_nCurrentOperation + 1) % 24;
+    // 유효한 인디케이터 인덱스 확인 (이미 위에서 maxOperations로 제한했으므로 여기서는 항상 유효함)
+    if (m_indicators[indicatorIndex].connected) {
+        if (isReadCommand) {
+            // PLC에서 명령 읽어서 인디케이터로 전송
+            if (!ReadCommandFromPLCToIndicator(indicatorIndex)) {
+                // 실패 시 무시하고 넘어감
+            }
+        }
+        else {
+            // 인디케이터 측정값을 PLC에 쓰기 전에 데이터 읽기
+            if (!ReadIndicatorData(indicatorIndex)) {
+                // 데이터 읽기 실패 시, 인디케이터 연결 확인
+                if (!m_indicators[indicatorIndex].connected && m_bPolling) {
+                    ConnectToIndicator(indicatorIndex);
+                }
+            }
+            // WriteIndicatorValueToPLC는 ReadIndicatorData의 응답 처리에서 호출하도록 함
+        }
+    }
+    else if (m_bPolling) {
+        // 연결되지 않은 인디케이터 연결 시도
+        ConnectToIndicator(indicatorIndex);
+    }
+
+    // 다음 작업으로 이동 (연결된 인디케이터 수에 맞게 순환)
+    m_nCurrentOperation = (m_nCurrentOperation + 1) % maxOperations;
 
     return TRUE;
 }
