@@ -292,6 +292,11 @@ BOOL CMy0430MFCAppDlg::ConnectToIndicator(int index)
         return FALSE;
     }
 
+    // 연결 타임아웃 설정 
+    int timeout = 100; 
+    indicator.socket.SetSockOpt(SO_SNDTIMEO, &timeout, sizeof(timeout));
+    indicator.socket.SetSockOpt(SO_RCVTIMEO, &timeout, sizeof(timeout));
+
     // 연결
     if (!indicator.socket.Connect(indicator.ip, indicator.port)) {
         int nError = GetLastError();
@@ -933,6 +938,11 @@ BOOL CMy0430MFCAppDlg::ConnectToPLC(const CString& ipAddress, int port)
         return FALSE;
     }
 
+    // 연결 타임아웃 설정
+    int timeout = 100; 
+    m_plcSocket.SetSockOpt(SO_SNDTIMEO, &timeout, sizeof(timeout));
+    m_plcSocket.SetSockOpt(SO_RCVTIMEO, &timeout, sizeof(timeout));
+
     // PLC 연결 시도
     if (!m_plcSocket.Connect(ipAddress, port)) {
         int nError = GetLastError();
@@ -999,6 +1009,7 @@ void CMy0430MFCAppDlg::OnBnClickedButtonConnectPlc()
     }
 }
 // 인디케이터 측정값을 PLC에 쓰는 함수
+// WriteIndicatorValueToPLC 함수 수정
 BOOL CMy0430MFCAppDlg::WriteIndicatorValueToPLC(int indicatorIndex)
 {
     if (indicatorIndex < 0 || indicatorIndex >= m_indicatorCount) {
@@ -1007,55 +1018,70 @@ BOOL CMy0430MFCAppDlg::WriteIndicatorValueToPLC(int indicatorIndex)
 
     // PLC가 연결되어 있지 않으면 실패
     if (!m_plcSocket.IsConnected()) {
+        // 여기서 PLC가 연결되어 있지 않은 경우, 로그만 남기고 종료
+        AddLog(_T("PLC에 연결되어 있지 않아 데이터를 쓸 수 없습니다."));
         return FALSE;
     }
 
-    IndicatorInfo& indicator = m_indicators[indicatorIndex];
+    try {
+        IndicatorInfo& indicator = m_indicators[indicatorIndex];
 
-    // PLC 메모리 주소 계산 (D6000 + 인디케이터 인덱스 * 10)
-    WORD plcAddress = 6000 + (indicatorIndex * 10);
+        // PLC 메모리 주소 계산 (D6000 + 인디케이터 인덱스 * 10)
+        WORD plcAddress = 6000 + (indicatorIndex * 10);
 
-    // ModBus TCP 요청 패킷 구성 (Write Multiple Registers, 함수 코드 0x10)
-    BYTE requestPacket[17]; // MBAP(7) + 함수코드(1) + 시작주소(2) + 레지스터 수(2) + 바이트 수(1) + 데이터(4)
+        // ModBus TCP 요청 패킷 구성 (Write Multiple Registers, 함수 코드 0x10)
+        BYTE requestPacket[17]; // MBAP(7) + 함수코드(1) + 시작주소(2) + 레지스터 수(2) + 바이트 수(1) + 데이터(4)
 
-    // MBAP 헤더
-    WORD transactionId = g_transactionId++;
-    requestPacket[0] = (transactionId >> 8) & 0xFF;  // Transaction ID High
-    requestPacket[1] = transactionId & 0xFF;         // Transaction ID Low
-    requestPacket[2] = 0x00;                         // Protocol ID High
-    requestPacket[3] = 0x00;                         // Protocol ID Low
-    requestPacket[4] = 0x00;                         // Length High
-    requestPacket[5] = 0x0B;                         // Length Low (11 바이트)
-    requestPacket[6] = 0x01;                         // Unit ID
+        // MBAP 헤더
+        WORD transactionId = g_transactionId++;
+        requestPacket[0] = (transactionId >> 8) & 0xFF;  // Transaction ID High
+        requestPacket[1] = transactionId & 0xFF;         // Transaction ID Low
+        requestPacket[2] = 0x00;                         // Protocol ID High
+        requestPacket[3] = 0x00;                         // Protocol ID Low
+        requestPacket[4] = 0x00;                         // Length High
+        requestPacket[5] = 0x0B;                         // Length Low (11 바이트)
+        requestPacket[6] = 0x01;                         // Unit ID
 
-    // PDU - Write Multiple Registers (0x10)
-    requestPacket[7] = 0x10;                         // Function Code
-    requestPacket[8] = (plcAddress >> 8) & 0xFF;     // Starting Address High
-    requestPacket[9] = plcAddress & 0xFF;            // Starting Address Low
-    requestPacket[10] = 0x00;                        // Register Count High
-    requestPacket[11] = 0x02;                        // Register Count Low (2 레지스터)
-    requestPacket[12] = 0x04;                        // Byte Count (4 바이트)
+        // PDU - Write Multiple Registers (0x10)
+        requestPacket[7] = 0x10;                         // Function Code
+        requestPacket[8] = (plcAddress >> 8) & 0xFF;     // Starting Address High
+        requestPacket[9] = plcAddress & 0xFF;            // Starting Address Low
+        requestPacket[10] = 0x00;                        // Register Count High
+        requestPacket[11] = 0x02;                        // Register Count Low (2 레지스터)
+        requestPacket[12] = 0x04;                        // Byte Count (4 바이트)
 
-    // 측정값 데이터 (32비트, 2 레지스터)
-    requestPacket[13] = (indicator.measuredValue >> 24) & 0xFF;
-    requestPacket[14] = (indicator.measuredValue >> 16) & 0xFF;
-    requestPacket[15] = (indicator.measuredValue >> 8) & 0xFF;
-    requestPacket[16] = indicator.measuredValue & 0xFF;
+        // 측정값 데이터 (32비트, 2 레지스터)
+        requestPacket[13] = (indicator.measuredValue >> 24) & 0xFF;
+        requestPacket[14] = (indicator.measuredValue >> 16) & 0xFF;
+        requestPacket[15] = (indicator.measuredValue >> 8) & 0xFF;
+        requestPacket[16] = indicator.measuredValue & 0xFF;
 
-    // 요청 전송
-    if (!m_plcSocket.SendData(requestPacket, sizeof(requestPacket))) {
+        // 요청 전송
+        if (!m_plcSocket.SendData(requestPacket, sizeof(requestPacket))) {
+            CString strError;
+            strError.Format(_T("PLC에 인디케이터 %d 측정값 쓰기 실패, 다시 연결을 시도합니다"), indicatorIndex + 1);
+            AddLog(strError);
+
+            // 실패 시 재연결 시도를 하지 않고 그냥 FALSE 반환
+            return FALSE;
+        }
+
+        CString strLog;
+        strLog.Format(_T("인디케이터 %d 측정값(%d)을 PLC 주소 D%d에 쓰기"),
+            indicatorIndex + 1, indicator.measuredValue, plcAddress);
+        AddLog(strLog);
+
+        return TRUE;
+    }
+    catch (CException* e) {
+        TCHAR szError[1024];
+        e->GetErrorMessage(szError, 1024);
         CString strError;
-        strError.Format(_T("PLC에 인디케이터 %d 측정값 쓰기 실패"), indicatorIndex + 1);
+        strError.Format(_T("PLC 데이터 쓰기 중 예외 발생: %s"), szError);
         AddLog(strError);
+        e->Delete();
         return FALSE;
     }
-
-    CString strLog;
-    strLog.Format(_T("인디케이터 %d 측정값(%d)을 PLC 주소 D%d에 쓰기"),
-        indicatorIndex + 1, indicator.measuredValue, plcAddress);
-    AddLog(strLog);
-
-    return TRUE;
 }
 
 // PLC에서 외부입력명령을 읽어 인디케이터에 보내는 함수
@@ -1160,19 +1186,36 @@ BOOL CMy0430MFCAppDlg::ExecuteSequentialOperation()
 
     // 유효한 인디케이터 인덱스 확인
     if (indicatorIndex < m_indicatorCount) {
+        // PLC 연결 상태 먼저 확인
+        if (!m_plcSocket.IsConnected() && m_bPolling) {
+            // PLC 재연결 시도
+            CString strLog;
+            strLog.Format(_T("PLC 연결이 끊어짐. 재연결 시도: %s:%d"), m_strPLCIP, m_nPLCPort);
+            AddLog(strLog);
+            ConnectToPLC(m_strPLCIP, m_nPLCPort);
+
+            // 다음 작업으로 넘어가고 이번 작업은 건너뜀
+            m_nCurrentOperation = (m_nCurrentOperation + 1) % 24;
+            return TRUE;
+        }
+
         if (m_indicators[indicatorIndex].connected) {
             if (isReadCommand) {
                 // PLC에서 명령 읽어서 인디케이터로 전송
-                ReadCommandFromPLCToIndicator(indicatorIndex);
+                if (!ReadCommandFromPLCToIndicator(indicatorIndex)) {
+                    // 실패 시 무시하고 넘어감
+                }
             }
             else {
-                // 인디케이터 측정값을 PLC에 쓰기
+                // 인디케이터 측정값을 PLC에 쓰기 전에 데이터 읽기
                 if (!ReadIndicatorData(indicatorIndex)) {
                     // 데이터 읽기 실패 시, 인디케이터 연결 확인
                     if (!m_indicators[indicatorIndex].connected && m_bPolling) {
                         ConnectToIndicator(indicatorIndex);
                     }
                 }
+                // WriteIndicatorValueToPLC는 ReadIndicatorData의 응답 처리에서 호출하도록 함
+                // 즉, 여기서는 직접 호출하지 않음
             }
         }
         else if (m_bPolling) {
