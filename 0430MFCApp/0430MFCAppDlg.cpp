@@ -894,74 +894,31 @@ BOOL CMy0430MFCAppDlg::ResetPLCCommand(int indicatorIndex)
     }
 
     // PLC 메모리 주소 계산 (D6005 + 인디케이터 인덱스 * 10)
+    // %DD -> %DW로 변경: 워드 타입으로 접근
     WORD plcAddress = 6005 + (indicatorIndex * 10);
 
-    // XGT 전용 프로토콜 패킷 구성 - 쓰기 요청
+    // ModBus TCP 요청 패킷 구성 (Write Single Register, 함수 코드 0x06)
+    BYTE requestPacket[12];
 
-    // 1. Company ID + 헤더 (20 바이트)
-    BYTE header[20] = {
-        0x4C, 0x53, 0x49, 0x53, 0x2D, 0x58, 0x47, 0x54, 0x00, 0x00, // "LSIS-XGT"
-        0x00, 0x00,  // PLC Info
-        0xA0,        // CPU Info
-        0x33,        // Source of Frame (0x33: Client->Server)
-        0x00, 0x03,  // Invoke ID (임의 값, 다르게 설정)
-        0x00, 0x00,  // Length (나중에 설정)
-        0x00,        // FEnet Position
-        0x00         // Reserved
-    };
+    // MBAP 헤더
+    WORD transactionId = g_transactionId++;
+    requestPacket[0] = (transactionId >> 8) & 0xFF;  // Transaction ID High
+    requestPacket[1] = transactionId & 0xFF;         // Transaction ID Low
+    requestPacket[2] = 0x00;                         // Protocol ID High
+    requestPacket[3] = 0x00;                         // Protocol ID Low
+    requestPacket[4] = 0x00;                         // Length High
+    requestPacket[5] = 0x06;                         // Length Low (6 바이트)
+    requestPacket[6] = 0x01;                         // Unit ID
 
-    // 2. 명령어 (Write Request: 0x0058)
-    BYTE command[2] = { 0x58, 0x00 };
-
-    // 3. 데이터 타입 (Word: 0x0002)
-    BYTE dataType[2] = { 0x02, 0x00 };
-
-    // 4. 예약 영역
-    BYTE reserved[2] = { 0x00, 0x00 };
-
-    // 5. 변수 개수 (1개)
-    BYTE varCount[2] = { 0x01, 0x00 };
-
-    // 6. 변수 이름 길이 (예: "%DW6005" = 7자)
-    CString strVarName;
-    strVarName.Format(_T("%%DW%d"), plcAddress);
-    CT2CA pszVarName(strVarName);
-    int varNameLen = strlen(pszVarName);
-    BYTE varNameLength[2] = { (BYTE)varNameLen, 0x00 };
-
-    // 7. 변수 이름 ("%DW6005")
-    std::vector<BYTE> varName(varNameLen);
-    memcpy(varName.data(), pszVarName, varNameLen);
-
-    // 8. 데이터 크기 (2 바이트 - WORD)
-    BYTE dataSize[2] = { 0x02, 0x00 };
-
-    // 9. 데이터 (0으로 초기화)
-    BYTE data[2] = { 0x00, 0x00 };  // 0 값
-
-    // 총 패킷 길이 계산 (헤더 제외)
-    int dataLength = sizeof(command) + sizeof(dataType) + sizeof(reserved) +
-        sizeof(varCount) + sizeof(varNameLength) + varNameLen +
-        sizeof(dataSize) + sizeof(data);
-
-    // 헤더의 Length 필드 업데이트
-    header[16] = dataLength & 0xFF;
-    header[17] = (dataLength >> 8) & 0xFF;
-
-    // 전체 패킷 구성
-    std::vector<BYTE> packet;
-    packet.insert(packet.end(), header, header + sizeof(header));
-    packet.insert(packet.end(), command, command + sizeof(command));
-    packet.insert(packet.end(), dataType, dataType + sizeof(dataType));
-    packet.insert(packet.end(), reserved, reserved + sizeof(reserved));
-    packet.insert(packet.end(), varCount, varCount + sizeof(varCount));
-    packet.insert(packet.end(), varNameLength, varNameLength + sizeof(varNameLength));
-    packet.insert(packet.end(), varName.begin(), varName.end());
-    packet.insert(packet.end(), dataSize, dataSize + sizeof(dataSize));
-    packet.insert(packet.end(), data, data + sizeof(data));
+    // PDU - Write Single Register (0x06)
+    requestPacket[7] = 0x06;                         // Function Code
+    requestPacket[8] = (plcAddress >> 8) & 0xFF;     // Register Address High
+    requestPacket[9] = plcAddress & 0xFF;            // Register Address Low
+    requestPacket[10] = 0x00;                        // Register Value High (0으로 초기화)
+    requestPacket[11] = 0x00;                        // Register Value Low (0으로 초기화)
 
     // 요청 전송
-    if (!m_plcSocket.SendData(packet.data(), packet.size())) {
+    if (!m_plcSocket.SendData(requestPacket, sizeof(requestPacket))) {
         CString strError;
         strError.Format(_T("PLC 인디케이터 %d 명령 리셋 실패"), indicatorIndex + 1);
         AddLog(strError);
@@ -969,7 +926,7 @@ BOOL CMy0430MFCAppDlg::ResetPLCCommand(int indicatorIndex)
     }
 
     CString strLog;
-    strLog.Format(_T("PLC 주소 D%d의 명령을 0으로 리셋 (XGT 프로토콜)"), plcAddress);
+    strLog.Format(_T("PLC 주소 %DW%d 명령 리셋 완료"), plcAddress);
     AddLog(strLog);
 
     return TRUE;
@@ -1280,6 +1237,7 @@ BOOL CMy0430MFCAppDlg::WriteIndicatorValueToPLC(int indicatorIndex)
 
     // PLC가 연결되어 있지 않으면 실패
     if (!m_plcSocket.IsConnected()) {
+        // 여기서 PLC가 연결되어 있지 않은 경우, 로그만 남기고 종료
         AddLog(_T("PLC에 연결되어 있지 않아 데이터를 쓸 수 없습니다."));
         return FALSE;
     }
@@ -1287,90 +1245,49 @@ BOOL CMy0430MFCAppDlg::WriteIndicatorValueToPLC(int indicatorIndex)
     try {
         IndicatorInfo& indicator = m_indicators[indicatorIndex];
 
-        // PLC 메모리 주소 계산 (각 인디케이터는 10 간격으로 D6000부터 시작)
+        // PLC 메모리 주소 계산 (D6000 + 인디케이터 인덱스 * 10)
+        // %DD -> %DW로 변경: 워드 타입으로 접근
         WORD plcAddress = 6000 + (indicatorIndex * 10);
 
-        // 측정값은 32비트(2xWORD)이므로 Double Word 타입 사용
+        // ModBus TCP 요청 패킷 구성 (Write Multiple Registers, 함수 코드 0x10)
+        BYTE requestPacket[17]; // MBAP(7) + 함수코드(1) + 시작주소(2) + 레지스터 수(2) + 바이트 수(1) + 데이터(4)
 
-        // XGT 전용 프로토콜 패킷 구성 - 연속 쓰기(바이트 단위)
+        // MBAP 헤더
+        WORD transactionId = g_transactionId++;
+        requestPacket[0] = (transactionId >> 8) & 0xFF;  // Transaction ID High
+        requestPacket[1] = transactionId & 0xFF;         // Transaction ID Low
+        requestPacket[2] = 0x00;                         // Protocol ID High
+        requestPacket[3] = 0x00;                         // Protocol ID Low
+        requestPacket[4] = 0x00;                         // Length High
+        requestPacket[5] = 0x0B;                         // Length Low (11 바이트)
+        requestPacket[6] = 0x01;                         // Unit ID
 
-        // 1. Company ID + 헤더 (20 바이트)
-        BYTE header[20] = {
-            0x4C, 0x53, 0x49, 0x53, 0x2D, 0x58, 0x47, 0x54, 0x00, 0x00, // "LSIS-XGT"
-            0x00, 0x00,  // PLC Info
-            0xA0,        // CPU Info
-            0x33,        // Source of Frame (0x33: Client->Server)
-            0x00, 0x01,  // Invoke ID (임의 값)
-            0x00, 0x00,  // Length (나중에 설정)
-            0x00,        // FEnet Position
-            0x00         // Reserved
-        };
+        // PDU - Write Multiple Registers (0x10)
+        requestPacket[7] = 0x10;                         // Function Code
+        requestPacket[8] = (plcAddress >> 8) & 0xFF;     // Starting Address High
+        requestPacket[9] = plcAddress & 0xFF;            // Starting Address Low
+        requestPacket[10] = 0x00;                        // Register Count High
+        requestPacket[11] = 0x02;                        // Register Count Low (2 레지스터)
+        requestPacket[12] = 0x04;                        // Byte Count (4 바이트)
 
-        // 2. 명령어 (Write Request: 0x0058)
-        BYTE command[2] = { 0x58, 0x00 };
-
-        // 3. 데이터 타입 (Double Word: 0x0003)
-        BYTE dataType[2] = { 0x03, 0x00 };
-
-        // 4. 예약 영역
-        BYTE reserved[2] = { 0x00, 0x00 };
-
-        // 5. 변수 개수 (1개)
-        BYTE varCount[2] = { 0x01, 0x00 };
-
-        // 6. 변수 이름 길이 (예: "%DD6000" = 7자)
-        CString strVarName;
-        strVarName.Format(_T("%%DD%d"), plcAddress);
-        CT2CA pszVarName(strVarName);
-        int varNameLen = strlen(pszVarName);
-        BYTE varNameLength[2] = { (BYTE)varNameLen, 0x00 };
-
-        // 7. 변수 이름 ("%DD6000")
-        std::vector<BYTE> varName(varNameLen);
-        memcpy(varName.data(), pszVarName, varNameLen);
-
-        // 8. 데이터 크기 (4 바이트 - DWORD)
-        BYTE dataSize[2] = { 0x04, 0x00 };
-
-        // 9. 데이터 (측정값 - 32비트)
-        // XGT 프로토콜은 리틀 엔디안(최하위 바이트 먼저)을 사용
-        BYTE data[4];
-        data[0] = (indicator.measuredValue >> 0) & 0xFF;   // 최하위 바이트
-        data[1] = (indicator.measuredValue >> 8) & 0xFF;
-        data[2] = (indicator.measuredValue >> 16) & 0xFF;
-        data[3] = (indicator.measuredValue >> 24) & 0xFF;  // 최상위 바이트
-
-        // 총 패킷 길이 계산 (헤더 제외)
-        int dataLength = sizeof(command) + sizeof(dataType) + sizeof(reserved) +
-            sizeof(varCount) + sizeof(varNameLength) + varNameLen +
-            sizeof(dataSize) + sizeof(data);
-
-        // 헤더의 Length 필드 업데이트
-        header[16] = dataLength & 0xFF;
-        header[17] = (dataLength >> 8) & 0xFF;
-
-        // 전체 패킷 구성
-        std::vector<BYTE> packet;
-        packet.insert(packet.end(), header, header + sizeof(header));
-        packet.insert(packet.end(), command, command + sizeof(command));
-        packet.insert(packet.end(), dataType, dataType + sizeof(dataType));
-        packet.insert(packet.end(), reserved, reserved + sizeof(reserved));
-        packet.insert(packet.end(), varCount, varCount + sizeof(varCount));
-        packet.insert(packet.end(), varNameLength, varNameLength + sizeof(varNameLength));
-        packet.insert(packet.end(), varName.begin(), varName.end());
-        packet.insert(packet.end(), dataSize, dataSize + sizeof(dataSize));
-        packet.insert(packet.end(), data, data + sizeof(data));
+        // 측정값 데이터 (32비트, 2 레지스터) - 워드 타입으로 전송
+        requestPacket[13] = (indicator.measuredValue >> 24) & 0xFF;
+        requestPacket[14] = (indicator.measuredValue >> 16) & 0xFF;
+        requestPacket[15] = (indicator.measuredValue >> 8) & 0xFF;
+        requestPacket[16] = indicator.measuredValue & 0xFF;
 
         // 요청 전송
-        if (!m_plcSocket.SendData(packet.data(), packet.size())) {
+        if (!m_plcSocket.SendData(requestPacket, sizeof(requestPacket))) {
             CString strError;
-            strError.Format(_T("PLC에 인디케이터 %d 측정값 쓰기 실패"), indicatorIndex + 1);
+            strError.Format(_T("PLC에 인디케이터 %d 측정값 쓰기 실패, 다시 연결을 시도합니다"), indicatorIndex + 1);
             AddLog(strError);
+
+            // 실패 시 재연결 시도를 하지 않고 그냥 FALSE 반환
             return FALSE;
         }
 
         CString strLog;
-        strLog.Format(_T("인디케이터 %d 측정값(%d)을 PLC 주소 D%d에 쓰기 요청 (XGT 프로토콜)"),
+        strLog.Format(_T("인디케이터 %d 측정값(%d)을 PLC 주소 %DW%d에 쓰기"),
             indicatorIndex + 1, indicator.measuredValue, plcAddress);
         AddLog(strLog);
 
@@ -1386,6 +1303,7 @@ BOOL CMy0430MFCAppDlg::WriteIndicatorValueToPLC(int indicatorIndex)
         return FALSE;
     }
 }
+
 // PLC에서 외부입력명령을 읽어 인디케이터에 보내는 함수 - XGT 프로토콜 사용
 BOOL CMy0430MFCAppDlg::ReadCommandFromPLCToIndicator(int indicatorIndex)
 {
@@ -1398,89 +1316,45 @@ BOOL CMy0430MFCAppDlg::ReadCommandFromPLCToIndicator(int indicatorIndex)
         return FALSE;
     }
 
-    try {
-        // PLC 메모리 주소 계산 (D6005 + 인디케이터 인덱스 * 10)
-        WORD plcAddress = 6005 + (indicatorIndex * 10);
+    // PLC 메모리 주소 계산 (D6005 + 인디케이터 인덱스 * 10)
+    // %DD -> %DW로 변경: 워드 타입으로 접근
+    WORD plcAddress = 6005 + (indicatorIndex * 10);
 
-        // XGT 전용 프로토콜 패킷 구성 - 읽기 요청
+    // ModBus TCP 요청 패킷 구성 (Read Holding Registers, 함수 코드 0x03)
+    BYTE requestPacket[12];
 
-        // 1. Company ID + 헤더 (20 바이트)
-        BYTE header[20] = {
-            0x4C, 0x53, 0x49, 0x53, 0x2D, 0x58, 0x47, 0x54, 0x00, 0x00, // "LSIS-XGT"
-            0x00, 0x00,  // PLC Info
-            0xA0,        // CPU Info
-            0x33,        // Source of Frame (0x33: Client->Server)
-            0x00, 0x02,  // Invoke ID (임의 값, 각 요청마다 다르게)
-            0x00, 0x00,  // Length (나중에 설정)
-            0x00,        // FEnet Position
-            0x00         // Reserved
-        };
+    // MBAP 헤더
+    WORD transactionId = g_transactionId++;
+    requestPacket[0] = (transactionId >> 8) & 0xFF;  // Transaction ID High
+    requestPacket[1] = transactionId & 0xFF;         // Transaction ID Low
+    requestPacket[2] = 0x00;                         // Protocol ID High
+    requestPacket[3] = 0x00;                         // Protocol ID Low
+    requestPacket[4] = 0x00;                         // Length High
+    requestPacket[5] = 0x06;                         // Length Low (6 바이트)
+    requestPacket[6] = 0x01;                         // Unit ID
 
-        // 2. 명령어 (Read Request: 0x0054)
-        BYTE command[2] = { 0x54, 0x00 };
+    // PDU - Read Holding Registers (0x03)
+    requestPacket[7] = 0x03;                         // Function Code
+    requestPacket[8] = (plcAddress >> 8) & 0xFF;     // Starting Address High
+    requestPacket[9] = plcAddress & 0xFF;            // Starting Address Low
+    requestPacket[10] = 0x00;                        // Number of Registers High
+    requestPacket[11] = 0x01;                        // Number of Registers Low (1 레지스터)
 
-        // 3. 데이터 타입 (Word: 0x0002)
-        BYTE dataType[2] = { 0x02, 0x00 };
-
-        // 4. 예약 영역
-        BYTE reserved[2] = { 0x00, 0x00 };
-
-        // 5. 변수 개수 (1개)
-        BYTE varCount[2] = { 0x01, 0x00 };
-
-        // 6. 변수 이름 길이 (예: "%DW6005" = 7자)
-        CString strVarName;
-        strVarName.Format(_T("%%DW%d"), plcAddress);
-        CT2CA pszVarName(strVarName);
-        int varNameLen = strlen(pszVarName);
-        BYTE varNameLength[2] = { (BYTE)varNameLen, 0x00 };
-
-        // 7. 변수 이름 ("%DW6005")
-        std::vector<BYTE> varName(varNameLen);
-        memcpy(varName.data(), pszVarName, varNameLen);
-
-        // 총 패킷 길이 계산 (헤더 제외)
-        int dataLength = sizeof(command) + sizeof(dataType) + sizeof(reserved) +
-            sizeof(varCount) + sizeof(varNameLength) + varNameLen;
-
-        // 헤더의 Length 필드 업데이트
-        header[16] = dataLength & 0xFF;
-        header[17] = (dataLength >> 8) & 0xFF;
-
-        // 전체 패킷 구성
-        std::vector<BYTE> packet;
-        packet.insert(packet.end(), header, header + sizeof(header));
-        packet.insert(packet.end(), command, command + sizeof(command));
-        packet.insert(packet.end(), dataType, dataType + sizeof(dataType));
-        packet.insert(packet.end(), reserved, reserved + sizeof(reserved));
-        packet.insert(packet.end(), varCount, varCount + sizeof(varCount));
-        packet.insert(packet.end(), varNameLength, varNameLength + sizeof(varNameLength));
-        packet.insert(packet.end(), varName.begin(), varName.end());
-
-        // 요청 전송
-        if (!m_plcSocket.SendData(packet.data(), packet.size())) {
-            CString strError;
-            strError.Format(_T("PLC에서 인디케이터 %d 명령 읽기 요청 실패"), indicatorIndex + 1);
-            AddLog(strError);
-            return FALSE;
-        }
-
-        CString strLog;
-        strLog.Format(_T("PLC 주소 D%d에서 인디케이터 %d 명령 읽기 요청 (XGT 프로토콜)"),
-            plcAddress, indicatorIndex + 1);
-        AddLog(strLog);
-
-        return TRUE;
-    }
-    catch (CException* e) {
-        TCHAR szError[1024];
-        e->GetErrorMessage(szError, 1024);
+    // 요청 전송
+    if (!m_plcSocket.SendData(requestPacket, sizeof(requestPacket))) {
         CString strError;
-        strError.Format(_T("PLC 데이터 읽기 중 예외 발생: %s"), szError);
+        strError.Format(_T("PLC에서 인디케이터 %d 명령 읽기 실패"), indicatorIndex + 1);
         AddLog(strError);
-        e->Delete();
         return FALSE;
     }
+
+    CString strLog;
+    strLog.Format(_T("PLC 주소 %DW%d에서 인디케이터 %d 명령 읽기 요청"),
+        plcAddress, indicatorIndex + 1);
+    AddLog(strLog);
+
+    // 응답은 OnSocketReceive에서 처리
+    return TRUE;
 }
 
 // 인디케이터에 명령을 보내는 함수
