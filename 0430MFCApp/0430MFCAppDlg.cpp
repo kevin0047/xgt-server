@@ -1269,7 +1269,6 @@ void CMy0430MFCAppDlg::OnBnClickedButtonConnectPlc()
         e->Delete();
     }
 }
-// 인디케이터 측정값을 PLC에 쓰는 함수
 
 // PLC에 인디케이터 측정값을 쓰는 함수 - XGT 프로토콜 사용
 BOOL CMy0430MFCAppDlg::WriteIndicatorValueToPLC(int indicatorIndex)
@@ -1290,7 +1289,7 @@ BOOL CMy0430MFCAppDlg::WriteIndicatorValueToPLC(int indicatorIndex)
         // PLC 메모리 주소 계산 (각 인디케이터는 10 간격으로 D6000부터 시작)
         WORD plcAddress = 6000 + (indicatorIndex * 10);
 
-        // 측정값은 32비트(2xWORD)이므로 Double Word 타입 사용
+        // DD에서 DW로 변경 - 이제 Word 타입 사용
 
         // XGT 전용 프로토콜 패킷 구성 - 연속 쓰기(바이트 단위)
 
@@ -1309,8 +1308,8 @@ BOOL CMy0430MFCAppDlg::WriteIndicatorValueToPLC(int indicatorIndex)
         // 2. 명령어 (Write Request: 0x0058)
         BYTE command[2] = { 0x58, 0x00 };
 
-        // 3. 데이터 타입 (Double Word: 0x0003)
-        BYTE dataType[2] = { 0x03, 0x00 };
+        // 3. 데이터 타입 (Double Word: 0x0003에서 Word: 0x0002로 변경)
+        BYTE dataType[2] = { 0x02, 0x00 };
 
         // 4. 예약 영역
         BYTE reserved[2] = { 0x00, 0x00 };
@@ -1318,27 +1317,26 @@ BOOL CMy0430MFCAppDlg::WriteIndicatorValueToPLC(int indicatorIndex)
         // 5. 변수 개수 (1개)
         BYTE varCount[2] = { 0x01, 0x00 };
 
-        // 6. 변수 이름 길이 (예: "%DD6000" = 7자)
+        // 6. 변수 이름 길이 (예: "%DW6000" = 7자)
         CString strVarName;
-        strVarName.Format(_T("%%DD%d"), plcAddress);
+        strVarName.Format(_T("%%DW%d"), plcAddress); // DD에서 DW로 변경
         CT2CA pszVarName(strVarName);
         int varNameLen = strlen(pszVarName);
         BYTE varNameLength[2] = { (BYTE)varNameLen, 0x00 };
 
-        // 7. 변수 이름 ("%DD6000")
+        // 7. 변수 이름 ("%DW6000")
         std::vector<BYTE> varName(varNameLen);
         memcpy(varName.data(), pszVarName, varNameLen);
 
-        // 8. 데이터 크기 (4 바이트 - DWORD)
-        BYTE dataSize[2] = { 0x04, 0x00 };
+        // 8. 데이터 크기 (4 바이트에서 2 바이트로 변경 - WORD)
+        BYTE dataSize[2] = { 0x02, 0x00 };
 
-        // 9. 데이터 (측정값 - 32비트)
+        // 9. 데이터 (측정값 - 32비트에서 16비트로 변경)
         // XGT 프로토콜은 리틀 엔디안(최하위 바이트 먼저)을 사용
-        BYTE data[4];
+        BYTE data[2];
         data[0] = (indicator.measuredValue >> 0) & 0xFF;   // 최하위 바이트
-        data[1] = (indicator.measuredValue >> 8) & 0xFF;
-        data[2] = (indicator.measuredValue >> 16) & 0xFF;
-        data[3] = (indicator.measuredValue >> 24) & 0xFF;  // 최상위 바이트
+        data[1] = (indicator.measuredValue >> 8) & 0xFF;   // 상위 바이트
+        // 주의: 상위 2바이트 데이터는 손실됩니다 (16비트 초과 값 사용 시 주의)
 
         // 총 패킷 길이 계산 (헤더 제외)
         int dataLength = sizeof(command) + sizeof(dataType) + sizeof(reserved) +
@@ -1370,7 +1368,7 @@ BOOL CMy0430MFCAppDlg::WriteIndicatorValueToPLC(int indicatorIndex)
         }
 
         CString strLog;
-        strLog.Format(_T("인디케이터 %d 측정값(%d)을 PLC 주소 D%d에 쓰기 요청 (XGT 프로토콜)"),
+        strLog.Format(_T("인디케이터 %d 측정값(%d)을 PLC 주소 D%d에 쓰기 요청 (XGT 프로토콜, DW 타입)"),
             indicatorIndex + 1, indicator.measuredValue, plcAddress);
         AddLog(strLog);
 
