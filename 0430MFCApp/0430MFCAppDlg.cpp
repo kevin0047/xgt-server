@@ -86,6 +86,7 @@ CMy0430MFCAppDlg::CMy0430MFCAppDlg(CWnd* pParent /*=nullptr*/)
     , m_indicatorCount(0)
     , m_strPLCIP(_T("192.168.250.111"))  // PLC IP 초기화
     , m_nPLCPort(2004)       // PLC 포트 초기화
+    , m_strLogFilePath(_T(""))  // 로그 파일 경로 초기화
 {
     m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 }
@@ -166,6 +167,9 @@ BOOL CMy0430MFCAppDlg::OnInitDialog()
     m_listIndicators.InsertColumn(8, _T("측정 값"), LVCFMT_LEFT, 70);
     m_listIndicators.InsertColumn(9, _T("램프 상태"), LVCFMT_LEFT, 70);
     m_listIndicators.InsertColumn(10, _T("에러"), LVCFMT_LEFT, 50);
+
+    // 일별 로그 파일 생성
+    CreateDailyLogFile();
 
     // set.csv 파일 읽기
     if (!LoadIndicatorSettings(_T("set.csv"))) {
@@ -1073,9 +1077,33 @@ void CMy0430MFCAppDlg::AddLog(LPCTSTR pszLog)
     strTimedLog.Format(_T("[%02d:%02d:%02d] %s"),
         time.GetHour(), time.GetMinute(), time.GetSecond(), pszLog);
 
+    // 리스트 박스에 추가
     int nIndex = m_logList.AddString(strTimedLog);
     m_logList.SetTopIndex(nIndex);
+
+    // 로그 항목 제한
+    LimitLogItems();
+
+    // 연결 관련 로그인지 확인하여 파일에 저장
+    CString strLogLower = pszLog;
+    strLogLower.MakeLower();
+
+    // 연결 관련 키워드 확인
+    if (strLogLower.Find(_T("연결")) != -1 ||
+        strLogLower.Find(_T("connect")) != -1 ||
+        strLogLower.Find(_T("disconnect")) != -1 ||
+        strLogLower.Find(_T("오류")) != -1 ||
+        strLogLower.Find(_T("error")) != -1 ||
+        strLogLower.Find(_T("exception")) != -1 ||
+        strLogLower.Find(_T("예외")) != -1 ||
+        strLogLower.Find(_T("시작")) != -1 ||
+        strLogLower.Find(_T("종료")) != -1) {
+
+        // 파일에 저장
+        SaveLogToFile(pszLog);
+    }
 }
+
 
 // 로그 추가 (데이터 포함)
 void CMy0430MFCAppDlg::AddLog(LPCTSTR pszPrefix, const BYTE* pData, int nLength)
@@ -1582,4 +1610,117 @@ BOOL CMy0430MFCAppDlg::ExecuteSequentialOperation()
     m_nCurrentOperation = (m_nCurrentOperation + 1) % maxOperations;
 
     return TRUE;
+}
+// 일별 로그 파일 생성 함수
+void CMy0430MFCAppDlg::CreateDailyLogFile()
+{
+    // 현재 날짜로 파일 이름 생성
+    CTime currentTime = CTime::GetCurrentTime();
+    CString strFileName;
+    strFileName.Format(_T("Log_%04d%02d%02d.txt"),
+        currentTime.GetYear(), currentTime.GetMonth(), currentTime.GetDay());
+
+    // 실행 파일 경로 구하기
+    TCHAR szPath[MAX_PATH];
+    GetModuleFileName(NULL, szPath, MAX_PATH);
+    CString strPath(szPath);
+    int nPos = strPath.ReverseFind('\\');
+    if (nPos > 0)
+        strPath = strPath.Left(nPos + 1);
+
+    // 로그 폴더 생성
+    CString strLogFolder = strPath + _T("Logs");
+    CreateDirectory(strLogFolder, NULL);
+
+    // 로그 파일 경로 설정
+    m_strLogFilePath = strLogFolder + _T("\\") + strFileName;
+
+    // 파일이 없으면 헤더 추가
+    CFileStatus status;
+    if (!CFile::GetStatus(m_strLogFilePath, status)) {
+        try {
+            CStdioFile file(m_strLogFilePath, CFile::modeCreate | CFile::modeWrite | CFile::typeText);
+            file.WriteString(_T("==========================================================\r\n"));
+            file.WriteString(_T("             인디케이터 통신 프로그램 로그\r\n"));
+            file.WriteString(_T("==========================================================\r\n"));
+            file.WriteString(_T("시작 시간: "));
+
+            CString strStartTime;
+            strStartTime.Format(_T("%04d-%02d-%02d %02d:%02d:%02d\r\n\r\n"),
+                currentTime.GetYear(), currentTime.GetMonth(), currentTime.GetDay(),
+                currentTime.GetHour(), currentTime.GetMinute(), currentTime.GetSecond());
+
+            file.WriteString(strStartTime);
+            file.Close();
+        }
+        catch (CFileException* pEx) {
+            // 파일 예외 처리
+            TCHAR szError[1024];
+            pEx->GetErrorMessage(szError, 1024);
+            AfxMessageBox(szError);
+            pEx->Delete();
+        }
+    }
+
+    // 프로그램 시작 로그 추가
+    CString strLog;
+    strLog.Format(_T("프로그램 시작 - 버전 1.0 (%04d-%02d-%02d %02d:%02d:%02d)"),
+        currentTime.GetYear(), currentTime.GetMonth(), currentTime.GetDay(),
+        currentTime.GetHour(), currentTime.GetMinute(), currentTime.GetSecond());
+
+    SaveLogToFile(strLog);
+}
+
+// 로그를 파일에 저장하는 함수
+void CMy0430MFCAppDlg::SaveLogToFile(LPCTSTR pszLog)
+{
+    // 현재 날짜 확인
+    CTime currentTime = CTime::GetCurrentTime();
+    CString strExpectedFileName;
+    strExpectedFileName.Format(_T("Log_%04d%02d%02d.txt"),
+        currentTime.GetYear(), currentTime.GetMonth(), currentTime.GetDay());
+
+    // 파일 이름에서 날짜 부분 추출
+    CString strCurrentFileName = m_strLogFilePath.Right(m_strLogFilePath.GetLength() - m_strLogFilePath.ReverseFind('\\') - 1);
+
+    // 날짜가 변경되었는지 확인
+    if (strCurrentFileName != strExpectedFileName) {
+        // 새로운 날짜의 로그 파일 생성
+        CreateDailyLogFile();
+    }
+
+    try {
+        // 파일에 로그 추가
+        CStdioFile file(m_strLogFilePath, CFile::modeWrite | CFile::modeNoTruncate | CFile::modeCreate | CFile::typeText);
+        file.SeekToEnd();
+
+        CString strFormattedLog;
+        strFormattedLog.Format(_T("[%02d:%02d:%02d] %s\r\n"),
+            currentTime.GetHour(), currentTime.GetMinute(), currentTime.GetSecond(), pszLog);
+
+        file.WriteString(strFormattedLog);
+        file.Close();
+    }
+    catch (CFileException* pEx) {
+        // 파일 예외 처리
+        TCHAR szError[1024];
+        pEx->GetErrorMessage(szError, 1024);
+        TRACE(_T("로그 파일 쓰기 오류: %s\n"), szError);
+        pEx->Delete();
+    }
+}
+
+// 로그 항목 수 제한 함수
+void CMy0430MFCAppDlg::LimitLogItems()
+{
+    // 현재 로그 항목 수 확인
+    int nCount = m_logList.GetCount();
+
+    // 최대 항목 수를 초과하면 오래된 항목부터 삭제
+    if (nCount > MAX_LOG_ITEMS) {
+        int nDeleteCount = nCount - MAX_LOG_ITEMS;
+        for (int i = 0; i < nDeleteCount; i++) {
+            m_logList.DeleteString(0);  // 항상 가장 첫 번째 항목 삭제
+        }
+    }
 }

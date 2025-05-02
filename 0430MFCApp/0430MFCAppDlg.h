@@ -148,5 +148,12 @@ private:
     BOOL ExecuteSequentialOperation(); // 순차 작업 실행 함수
 
     CModbusTcpSocket m_plcSocket; // PLC 전용 소켓
+private:
+    static const int MAX_LOG_ITEMS = 1000;  // 최대 로그 항목 수
+    CString m_strLogFilePath;               // 로그 파일 경로
+
+    void SaveLogToFile(LPCTSTR pszLog);     // 로그를 파일에 저장하는 함수
+    void CreateDailyLogFile();              // 일별 로그 파일 생성 함수
+    void LimitLogItems();                   // 로그 항목 수 제한 함수
 };
 
