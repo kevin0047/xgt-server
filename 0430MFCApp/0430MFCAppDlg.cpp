@@ -1431,72 +1431,228 @@ BOOL CMy0430MFCAppDlg::ReadCommandFromPLCToIndicator(int indicatorIndex)
         WORD plcAddress = 6005 + (indicatorIndex * 10);
 
         // XGT 전용 프로토콜 패킷 구성 - 읽기 요청
+        const int BUFFER_SIZE = 512;
+        BYTE sendBuffer[BUFFER_SIZE] = { 0, };
 
-        // 1. Company ID + 헤더 (20 바이트)
-        BYTE header[20] = {
-            0x4C, 0x53, 0x49, 0x53, 0x2D, 0x58, 0x47, 0x54, 0x00, 0x00, // "LSIS-XGT"
-            0x00, 0x00,  // PLC Info
-            0xA0,        // CPU Info
-            0x33,        // Source of Frame (0x33: Client->Server)
-            0x00, 0x02,  // Invoke ID (임의 값, 각 요청마다 다르게)
-            0x00, 0x00,  // Length (나중에 설정)
-            0x00,        // FEnet Position
-            0x00         // Reserved
-        };
+        // Company ID (LSIS-XGT)
+        sendBuffer[0] = 0x4C;  // 'L'
+        sendBuffer[1] = 0x53;  // 'S'
+        sendBuffer[2] = 0x49;  // 'I'
+        sendBuffer[3] = 0x53;  // 'S'
+        sendBuffer[4] = 0x2D;  // '-'
+        sendBuffer[5] = 0x58;  // 'X'
+        sendBuffer[6] = 0x47;  // 'G'
+        sendBuffer[7] = 0x54;  // 'T'
+        sendBuffer[8] = 0x00;  // '\0'
+        sendBuffer[9] = 0x00;  // '\0'
 
-        // 2. 명령어 (Read Request: 0x0054)
-        BYTE command[2] = { 0x54, 0x00 };
+        // PLC Info (Don't care)
+        sendBuffer[10] = 0x00;
+        sendBuffer[11] = 0x00;
 
-        // 3. 데이터 타입 (Word: 0x0002) - 이미 Word 타입 사용 중
-        BYTE dataType[2] = { 0x02, 0x00 };
+        // CPU Info
+        sendBuffer[12] = 0xA0;
 
-        // 4. 예약 영역
-        BYTE reserved[2] = { 0x00, 0x00 };
+        // Source of Frame (PC -> PLC)
+        sendBuffer[13] = 0x33;
 
-        // 5. 변수 개수 (1개)
-        BYTE varCount[2] = { 0x01, 0x00 };
+        // Invoke ID (테스트 프로그램과 동일하게 0x0002 사용)
+        sendBuffer[14] = 0x02;
+        sendBuffer[15] = 0x00;
 
-        // 6. 변수 이름 길이 (예: "%DW6005" = 7자)
+        // 메모리 주소 문자열 생성
         CString strVarName;
-        strVarName.Format(_T("%%DW%d"), plcAddress); // DD에서 DW로 변경 (이미 DW를 사용 중인지 확인)
-        CT2CA pszVarName(strVarName);
-        int varNameLen = strlen(pszVarName);
-        BYTE varNameLength[2] = { (BYTE)varNameLen, 0x00 };
+        strVarName.Format(_T("%%DW%d"), plcAddress);
+        CStringA strMemAddressA(strVarName);
+        int memAddrLen = strMemAddressA.GetLength();
 
-        // 7. 변수 이름 ("%DW6005")
-        std::vector<BYTE> varName(varNameLen);
-        memcpy(varName.data(), pszVarName, varNameLen);
+        // 계산된 데이터 길이
+        int dataLength = 10 + memAddrLen;  // 명령어(2) + 데이터타입(2) + 예약영역(2) + 블록수(2) + 변수길이(2) + 변수(memAddrLen)
 
-        // 총 패킷 길이 계산 (헤더 제외)
-        int dataLength = sizeof(command) + sizeof(dataType) + sizeof(reserved) +
-            sizeof(varCount) + sizeof(varNameLength) + varNameLen;
+        // Length
+        sendBuffer[16] = (BYTE)(dataLength & 0xFF);
+        sendBuffer[17] = (BYTE)((dataLength >> 8) & 0xFF);
 
-        // 헤더의 Length 필드 업데이트
-        header[16] = dataLength & 0xFF;
-        header[17] = (dataLength >> 8) & 0xFF;
+        // FEnet Position
+        sendBuffer[18] = 0x00;
 
-        // 전체 패킷 구성
-        std::vector<BYTE> packet;
-        packet.insert(packet.end(), header, header + sizeof(header));
-        packet.insert(packet.end(), command, command + sizeof(command));
-        packet.insert(packet.end(), dataType, dataType + sizeof(dataType));
-        packet.insert(packet.end(), reserved, reserved + sizeof(reserved));
-        packet.insert(packet.end(), varCount, varCount + sizeof(varCount));
-        packet.insert(packet.end(), varNameLength, varNameLength + sizeof(varNameLength));
-        packet.insert(packet.end(), varName.begin(), varName.end());
+        // Reserved
+        sendBuffer[19] = 0x00;
 
-        // 요청 전송
-        if (!m_plcSocket.SendData(packet.data(), packet.size())) {
+        // Command (읽기 요청: 0x0054)
+        sendBuffer[20] = 0x54;
+        sendBuffer[21] = 0x00;
+
+        // Data Type (워드: 0x0002)
+        sendBuffer[22] = 0x02;
+        sendBuffer[23] = 0x00;
+
+        // 예약 영역
+        sendBuffer[24] = 0x00;
+        sendBuffer[25] = 0x00;
+
+        // 블록 수 (1개의 블록)
+        sendBuffer[26] = 0x01;
+        sendBuffer[27] = 0x00;
+
+        // 변수 길이 (메모리 주소 문자열 길이)
+        sendBuffer[28] = (BYTE)(memAddrLen & 0xFF);
+        sendBuffer[29] = (BYTE)((memAddrLen >> 8) & 0xFF);
+
+        // 변수 (메모리 주소 문자열)
+        for (int i = 0; i < memAddrLen; i++) {
+            sendBuffer[30 + i] = strMemAddressA[i];
+        }
+
+        // 데이터 전송
+        int totalSize = dataLength + 20;  // 헤더(20) + 데이터길이
+
+        CString strLog;
+        strLog.Format(_T("PLC 주소 D%d에서 인디케이터 %d 명령 읽기 요청 전송 (총 %d 바이트)"),
+            plcAddress, indicatorIndex + 1, totalSize);
+        AddLog(strLog);
+
+        // 디버깅 용 패킷 로그
+        CString strPacket = _T("전송 패킷: ");
+        for (int i = 0; i < min(totalSize, 50); i++) {
+            CString temp;
+            temp.Format(_T("%02X "), sendBuffer[i]);
+            strPacket += temp;
+        }
+        if (totalSize > 50) strPacket += _T("...");
+        AddLog(strPacket);
+
+        // Send 함수는 socket.SendData 대신 직접 Send 사용
+        int sendSize = m_plcSocket.Send(sendBuffer, totalSize);
+
+        if (sendSize != totalSize) {
             CString strError;
-            strError.Format(_T("PLC에서 인디케이터 %d 명령 읽기 요청 실패"), indicatorIndex + 1);
+            strError.Format(_T("PLC 명령 읽기 요청 전송 실패: %d/%d 바이트"), sendSize, totalSize);
             AddLog(strError);
             return FALSE;
         }
 
-        CString strLog;
-        strLog.Format(_T("PLC 주소 D%d에서 인디케이터 %d 명령 읽기 요청 (XGT 프로토콜, DW 타입)"),
-            plcAddress, indicatorIndex + 1);
+        // 응답 대기 (동기식)
+        BYTE recvBuffer[BUFFER_SIZE] = { 0, };
+
+        // 타임아웃 설정 (1초)
+        int timeout = 1000;
+        DWORD startTime = GetTickCount();
+
+        int recvSize = 0;
+        while ((GetTickCount() - startTime) < (DWORD)timeout) {
+            // 소켓에서 데이터 수신 시도
+            recvSize = m_plcSocket.Receive(recvBuffer, BUFFER_SIZE);
+            if (recvSize > 0) break;
+
+            // 짧은 시간 대기
+            Sleep(10);
+        }
+
+        if (recvSize <= 0) {
+            AddLog(_T("PLC 응답 수신 실패: 타임아웃 또는 오류"));
+            return FALSE;
+        }
+
+        // 디버깅 용 응답 패킷 로그
+        strPacket = _T("수신 패킷: ");
+        for (int i = 0; i < min(recvSize, 50); i++) {
+            CString temp;
+            temp.Format(_T("%02X "), recvBuffer[i]);
+            strPacket += temp;
+        }
+        if (recvSize > 50) strPacket += _T("...");
+        AddLog(strPacket);
+
+        // 응답 헤더 확인 (LSIS-XGT)
+        if (recvSize < 28 ||
+            recvBuffer[0] != 0x4C || recvBuffer[1] != 0x53 || recvBuffer[2] != 0x49 || recvBuffer[3] != 0x53 ||
+            recvBuffer[4] != 0x2D || recvBuffer[5] != 0x58 || recvBuffer[6] != 0x47 || recvBuffer[7] != 0x54) {
+
+            AddLog(_T("PLC 응답: 잘못된 헤더 또는 응답 길이 부족"));
+            return FALSE;
+        }
+
+        // 명령어 확인 (0x0055: 읽기 응답)
+        if (recvBuffer[20] != 0x55 || recvBuffer[21] != 0x00) {
+            AddLog(_T("PLC 응답: 잘못된 명령어 응답"));
+            return FALSE;
+        }
+
+        // 에러 상태 확인 (26,27 바이트)
+        WORD errorState = (recvBuffer[27] << 8) | recvBuffer[26];
+
+        if (errorState != 0) {
+            CString strError;
+            strError.Format(_T("PLC 데이터 읽기 에러: 0x%04X"), errorState);
+            AddLog(strError);
+
+            // 에러 코드에 따른 상세 메시지
+            switch (errorState) {
+            case 0x0001:
+                AddLog(_T("PLC 오류: 잘못된 메모리 주소 또는 액세스 권한 없음"));
+                break;
+            case 0x0002:
+                AddLog(_T("PLC 오류: 범위 초과"));
+                break;
+            case 0x0003:
+                AddLog(_T("PLC 오류: 데이터 크기 초과"));
+                break;
+            case 0x0004:
+                AddLog(_T("PLC 오류: 요청 데이터 오류"));
+                break;
+            default:
+                AddLog(_T("PLC 오류: 알 수 없는 오류 코드"));
+                break;
+            }
+
+            return FALSE;
+        }
+
+        // 블록 수 확인
+        if (recvSize < 30) {
+            AddLog(_T("PLC 응답: 데이터 블록 정보 없음"));
+            return FALSE;
+        }
+
+        WORD blockCount = (recvBuffer[29] << 8) | recvBuffer[28];
+
+        if (blockCount == 0) {
+            AddLog(_T("PLC 응답: 데이터 블록이 없음"));
+            return FALSE;
+        }
+
+        // 데이터 크기 확인
+        if (recvSize < 32) {
+            AddLog(_T("PLC 응답: 데이터 크기 정보 없음"));
+            return FALSE;
+        }
+
+        WORD dataSize = (recvBuffer[31] << 8) | recvBuffer[30];
+
+        if (dataSize != 2 || recvSize < 34) {  // WORD 타입은 2바이트
+            CString strError;
+            strError.Format(_T("PLC 응답: 예상 데이터 크기 불일치 (크기: %d, 필요: 2)"), dataSize);
+            AddLog(strError);
+            return FALSE;
+        }
+
+        // 데이터 읽기 - 테스트 프로그램과 동일하게 처리
+        // XGT 프로토콜은 리틀 엔디안으로 데이터 전송
+        WORD commandValue = (recvBuffer[33] << 8) | recvBuffer[32];
+
+        // 로그 출력
+        strLog.Format(_T("PLC 주소 D%d에서 인디케이터 %d 명령 값 읽기 성공: 0x%04X (%d)"),
+            plcAddress, indicatorIndex + 1, commandValue, commandValue);
         AddLog(strLog);
+
+        // 명령이 0이 아닌 경우 인디케이터로 전송
+        if (commandValue != 0) {
+            SendCommandToIndicator(indicatorIndex, commandValue);
+
+            // 명령을 처리한 후 PLC에 0을 다시 써서 초기화
+            ResetPLCCommand(indicatorIndex);
+        }
 
         return TRUE;
     }
