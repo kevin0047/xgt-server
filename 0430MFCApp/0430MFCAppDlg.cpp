@@ -7,6 +7,8 @@
 #include <fstream>
 #include <sstream>
 #include <atlconv.h>
+#include <Shlwapi.h>  
+#pragma comment(lib, "Shlwapi.lib")
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -1612,6 +1614,7 @@ BOOL CMy0430MFCAppDlg::ExecuteSequentialOperation()
     return TRUE;
 }
 // 일별 로그 파일 생성 함수
+// 일별 로그 파일 생성 함수
 void CMy0430MFCAppDlg::CreateDailyLogFile()
 {
     // 현재 날짜로 파일 이름 생성
@@ -1636,29 +1639,53 @@ void CMy0430MFCAppDlg::CreateDailyLogFile()
     m_strLogFilePath = strLogFolder + _T("\\") + strFileName;
 
     // 파일이 없으면 헤더 추가
-    CFileStatus status;
-    if (!CFile::GetStatus(m_strLogFilePath, status)) {
-        try {
-            CStdioFile file(m_strLogFilePath, CFile::modeCreate | CFile::modeWrite | CFile::typeText);
-            file.WriteString(_T("==========================================================\r\n"));
-            file.WriteString(_T("             인디케이터 통신 프로그램 로그\r\n"));
-            file.WriteString(_T("==========================================================\r\n"));
-            file.WriteString(_T("시작 시간: "));
+    BOOL bFileExists = PathFileExists(m_strLogFilePath);
 
-            CString strStartTime;
-            strStartTime.Format(_T("%04d-%02d-%02d %02d:%02d:%02d\r\n\r\n"),
+    if (!bFileExists) {
+        // Windows API를 사용하여 UTF-8로 파일 생성
+        HANDLE hFile = CreateFile(
+            m_strLogFilePath,
+            GENERIC_WRITE,
+            FILE_SHARE_READ,
+            NULL,
+            CREATE_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL,
+            NULL);
+
+        if (hFile != INVALID_HANDLE_VALUE) {
+            // UTF-8 BOM 추가
+            BYTE bom[] = { 0xEF, 0xBB, 0xBF };
+            DWORD bytesWritten = 0;
+            WriteFile(hFile, bom, sizeof(bom), &bytesWritten, NULL);
+
+            // 헤더 문자열 구성
+            CString strHeader;
+            strHeader.Format(
+                _T("==========================================================\r\n")
+                _T("             인디케이터 통신 프로그램 로그\r\n")
+                _T("==========================================================\r\n")
+                _T("시작 시간: %04d-%02d-%02d %02d:%02d:%02d\r\n\r\n"),
                 currentTime.GetYear(), currentTime.GetMonth(), currentTime.GetDay(),
                 currentTime.GetHour(), currentTime.GetMinute(), currentTime.GetSecond());
 
-            file.WriteString(strStartTime);
-            file.Close();
+            // CString을 UTF-8로 변환
+            int nLen = WideCharToMultiByte(CP_UTF8, 0, strHeader, -1, NULL, 0, NULL, NULL);
+            if (nLen > 0) {
+                char* pszUTF8 = new char[nLen];
+                WideCharToMultiByte(CP_UTF8, 0, strHeader, -1, pszUTF8, nLen, NULL, NULL);
+
+                // 파일에 쓰기
+                WriteFile(hFile, pszUTF8, nLen - 1, &bytesWritten, NULL); // -1은 NULL 종료 문자 제외
+                delete[] pszUTF8;
+            }
+
+            CloseHandle(hFile);
         }
-        catch (CFileException* pEx) {
-            // 파일 예외 처리
-            TCHAR szError[1024];
-            pEx->GetErrorMessage(szError, 1024);
-            AfxMessageBox(szError);
-            pEx->Delete();
+        else {
+            DWORD dwError = GetLastError();
+            CString strError;
+            strError.Format(_T("로그 파일 생성 오류: %d"), dwError);
+            AfxMessageBox(strError);
         }
     }
 
@@ -1689,26 +1716,47 @@ void CMy0430MFCAppDlg::SaveLogToFile(LPCTSTR pszLog)
         CreateDailyLogFile();
     }
 
-    try {
-        // 파일에 로그 추가
-        CStdioFile file(m_strLogFilePath, CFile::modeWrite | CFile::modeNoTruncate | CFile::modeCreate | CFile::typeText);
-        file.SeekToEnd();
+    // Windows API를 사용하여 UTF-8로 파일 열기
+    HANDLE hFile = CreateFile(
+        m_strLogFilePath,
+        GENERIC_WRITE,
+        FILE_SHARE_READ,
+        NULL,
+        OPEN_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL);
 
+    if (hFile != INVALID_HANDLE_VALUE) {
+        // 파일 끝으로 이동
+        SetFilePointer(hFile, 0, NULL, FILE_END);
+
+        // 포맷 변경: [시간] 내용 형식으로
         CString strFormattedLog;
         strFormattedLog.Format(_T("[%02d:%02d:%02d] %s\r\n"),
             currentTime.GetHour(), currentTime.GetMinute(), currentTime.GetSecond(), pszLog);
 
-        file.WriteString(strFormattedLog);
-        file.Close();
+        // CString을 UTF-8로 변환
+        int nLen = WideCharToMultiByte(CP_UTF8, 0, strFormattedLog, -1, NULL, 0, NULL, NULL);
+        if (nLen > 0) {
+            char* pszUTF8 = new char[nLen];
+            WideCharToMultiByte(CP_UTF8, 0, strFormattedLog, -1, pszUTF8, nLen, NULL, NULL);
+
+            // 파일에 쓰기
+            DWORD bytesWritten = 0;
+            WriteFile(hFile, pszUTF8, nLen - 1, &bytesWritten, NULL); // -1은 NULL 종료 문자 제외
+            delete[] pszUTF8;
+        }
+
+        CloseHandle(hFile);
     }
-    catch (CFileException* pEx) {
-        // 파일 예외 처리
-        TCHAR szError[1024];
-        pEx->GetErrorMessage(szError, 1024);
-        TRACE(_T("로그 파일 쓰기 오류: %s\n"), szError);
-        pEx->Delete();
+    else {
+        DWORD dwError = GetLastError();
+        CString strError;
+        strError.Format(_T("로그 파일 열기 오류: %d"), dwError);
+        TRACE(_T("%s\n"), strError);
     }
 }
+
 
 // 로그 항목 수 제한 함수
 void CMy0430MFCAppDlg::LimitLogItems()
