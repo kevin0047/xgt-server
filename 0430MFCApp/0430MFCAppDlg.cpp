@@ -1316,8 +1316,8 @@ BOOL CMy0430MFCAppDlg::WriteIndicatorValueToPLC(int indicatorIndex)
     try {
         IndicatorInfo& indicator = m_indicators[indicatorIndex];
 
-        // PLC 메모리 주소 계산 (각 인디케이터는 10 간격으로 D6000부터 시작)
-        WORD plcAddress = 6000 + (indicatorIndex * 10);
+        // PLC 메모리 주소 계산 (각 인디케이터는 10 간격으로 D6001부터 시작)
+        WORD plcAddress = 6001 + (indicatorIndex * 10);
 
         // DD에서 DW로 변경 - 이제 Word 타입 사용
 
@@ -1347,14 +1347,14 @@ BOOL CMy0430MFCAppDlg::WriteIndicatorValueToPLC(int indicatorIndex)
         // 5. 변수 개수 (1개)
         BYTE varCount[2] = { 0x01, 0x00 };
 
-        // 6. 변수 이름 길이 (예: "%DW6000" = 7자)
+        // 6. 변수 이름 길이 
         CString strVarName;
         strVarName.Format(_T("%%DW%d"), plcAddress); // DD에서 DW로 변경
         CT2CA pszVarName(strVarName);
         int varNameLen = strlen(pszVarName);
         BYTE varNameLength[2] = { (BYTE)varNameLen, 0x00 };
 
-        // 7. 변수 이름 ("%DW6000")
+        // 7. 변수 이름 
         std::vector<BYTE> varName(varNameLen);
         memcpy(varName.data(), pszVarName, varNameLen);
 
@@ -1456,7 +1456,7 @@ BOOL CMy0430MFCAppDlg::ReadCommandFromPLCToIndicator(int indicatorIndex)
         // Source of Frame (PC -> PLC)
         sendBuffer[13] = 0x33;
 
-        // Invoke ID (테스트 프로그램과 동일하게 0x0002 사용)
+        // Invoke ID 
         sendBuffer[14] = 0x02;
         sendBuffer[15] = 0x00;
 
