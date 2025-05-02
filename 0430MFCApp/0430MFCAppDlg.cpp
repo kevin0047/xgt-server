@@ -913,7 +913,7 @@ BOOL CMy0430MFCAppDlg::ResetPLCCommand(int indicatorIndex)
     // 2. 명령어 (Write Request: 0x0058)
     BYTE command[2] = { 0x58, 0x00 };
 
-    // 3. 데이터 타입 (Word: 0x0002)
+    // 3. 데이터 타입 (Word: 0x0002) 
     BYTE dataType[2] = { 0x02, 0x00 };
 
     // 4. 예약 영역
@@ -924,7 +924,7 @@ BOOL CMy0430MFCAppDlg::ResetPLCCommand(int indicatorIndex)
 
     // 6. 변수 이름 길이 (예: "%DW6005" = 7자)
     CString strVarName;
-    strVarName.Format(_T("%%DW%d"), plcAddress);
+    strVarName.Format(_T("%%DW%d"), plcAddress); 
     CT2CA pszVarName(strVarName);
     int varNameLen = strlen(pszVarName);
     BYTE varNameLength[2] = { (BYTE)varNameLen, 0x00 };
@@ -969,7 +969,7 @@ BOOL CMy0430MFCAppDlg::ResetPLCCommand(int indicatorIndex)
     }
 
     CString strLog;
-    strLog.Format(_T("PLC 주소 D%d의 명령을 0으로 리셋 (XGT 프로토콜)"), plcAddress);
+    strLog.Format(_T("PLC 주소 D%d의 명령을 0으로 리셋 (XGT 프로토콜, DW 타입)"), plcAddress);
     AddLog(strLog);
 
     return TRUE;
@@ -1417,7 +1417,7 @@ BOOL CMy0430MFCAppDlg::ReadCommandFromPLCToIndicator(int indicatorIndex)
         // 2. 명령어 (Read Request: 0x0054)
         BYTE command[2] = { 0x54, 0x00 };
 
-        // 3. 데이터 타입 (Word: 0x0002)
+        // 3. 데이터 타입 (Word: 0x0002) - 이미 Word 타입 사용 중
         BYTE dataType[2] = { 0x02, 0x00 };
 
         // 4. 예약 영역
@@ -1428,7 +1428,7 @@ BOOL CMy0430MFCAppDlg::ReadCommandFromPLCToIndicator(int indicatorIndex)
 
         // 6. 변수 이름 길이 (예: "%DW6005" = 7자)
         CString strVarName;
-        strVarName.Format(_T("%%DW%d"), plcAddress);
+        strVarName.Format(_T("%%DW%d"), plcAddress); // DD에서 DW로 변경 (이미 DW를 사용 중인지 확인)
         CT2CA pszVarName(strVarName);
         int varNameLen = strlen(pszVarName);
         BYTE varNameLength[2] = { (BYTE)varNameLen, 0x00 };
@@ -1464,7 +1464,7 @@ BOOL CMy0430MFCAppDlg::ReadCommandFromPLCToIndicator(int indicatorIndex)
         }
 
         CString strLog;
-        strLog.Format(_T("PLC 주소 D%d에서 인디케이터 %d 명령 읽기 요청 (XGT 프로토콜)"),
+        strLog.Format(_T("PLC 주소 D%d에서 인디케이터 %d 명령 읽기 요청 (XGT 프로토콜, DW 타입)"),
             plcAddress, indicatorIndex + 1);
         AddLog(strLog);
 
