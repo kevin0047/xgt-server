@@ -284,10 +284,23 @@ BOOL CMy0430MFCAppDlg::ConnectToIndicator(int index)
 
     IndicatorInfo& indicator = m_indicators[index];
 
-    // 이미 연결되어 있으면 재연결
+    // 이미 연결된 상태면 리턴 (재연결 방지)
+    if (indicator.connected && indicator.socket.IsConnected()) {
+        return TRUE;
+    }
+
+    // 연결 해제 후 잠시 대기
     if (indicator.connected) {
         DisconnectIndicator(index);
+        Sleep(100); // 소켓이 완전히 닫힐 때까지 잠시 대기
     }
+
+    // 소켓 재생성
+    indicator.socket.SetParent(this);
+    indicator.socket.SetSocketID(index);
+
+    // 이전 소켓이 남아있을 수 있으므로 강제 해제
+    indicator.socket.Detach();
 
     // 소켓 생성
     if (!indicator.socket.Create()) {
@@ -298,8 +311,8 @@ BOOL CMy0430MFCAppDlg::ConnectToIndicator(int index)
         return FALSE;
     }
 
-    // 연결 타임아웃 설정 
-    int timeout = 100;
+    // 연결 타임아웃 설정 (더 길게 설정)
+    int timeout = 1000; // 1초로 증가
     indicator.socket.SetSockOpt(SO_SNDTIMEO, &timeout, sizeof(timeout));
     indicator.socket.SetSockOpt(SO_RCVTIMEO, &timeout, sizeof(timeout));
 
@@ -1733,28 +1746,40 @@ BOOL CMy0430MFCAppDlg::ExecuteSequentialOperation()
 
     // PLC 연결 상태 먼저 확인
     if (!m_plcSocket.IsConnected() && m_bPolling) {
-        // PLC 재연결 시도
         CString strLog;
         strLog.Format(_T("PLC 연결이 끊어짐. 재연결 시도: %s:%d"), m_strPLCIP, m_nPLCPort);
         AddLog(strLog);
         ConnectToPLC(m_strPLCIP, m_nPLCPort);
-
-        // 다음 작업으로 넘어가고 이번 작업은 건너뜀
         m_nCurrentOperation = (m_nCurrentOperation + 1) % maxOperations;
         return TRUE;
     }
 
     // 유효한 인디케이터 인덱스 확인
     if (indicatorIndex < m_indicatorCount) {
-        // 인디케이터 연결 상태 확인
-        if (!m_indicators[indicatorIndex].connected) {
-            // 연결 끊어진 경우 - 계속해서 오류 상태 보고
+        IndicatorInfo& indicator = m_indicators[indicatorIndex];
+
+        // 연결 상태를 더 정확하게 확인
+        bool isConnected = indicator.connected && indicator.socket.IsConnected();
+
+        if (!isConnected) {
+            // 연결 끊어진 경우 - 오류 상태 보고
             ReportIndicatorErrorToPLC(indicatorIndex, true);
 
-            // 재연결 시도 (선택사항)
-            if (m_bPolling && indicatorIndex < m_indicatorCount) {
-                ConnectToIndicator(indicatorIndex);
+            // 재연결 시도 (짧은 지연 추가)
+            if (m_bPolling) {
+                static DWORD lastReconnectAttempt[32] = { 0 }; // 각 인디케이터별 마지막 연결 시도 시간
+                DWORD currentTime = GetTickCount();
+
+                // 마지막 연결 시도에서 최소 5초 경과 후 재시도
+                if (currentTime - lastReconnectAttempt[indicatorIndex] > 5000) {
+                    ConnectToIndicator(indicatorIndex);
+                    lastReconnectAttempt[indicatorIndex] = currentTime;
+                }
             }
+
+            // 연결 시도 후 다음 작업 건너뛰기 (안정화 시간 확보)
+            m_nCurrentOperation = (m_nCurrentOperation + 2) % maxOperations;
+            return TRUE;
         }
         else {
             // 인디케이터가 연결된 경우
@@ -1764,15 +1789,12 @@ BOOL CMy0430MFCAppDlg::ExecuteSequentialOperation()
                     CString strError;
                     strError.Format(_T("인디케이터 %d 명령 읽기 실패"), indicatorIndex + 1);
                     AddLog(strError);
-
-                    // 오류 상태를 PLC에 보고
                     ReportIndicatorErrorToPLC(indicatorIndex, true);
                 }
             }
             else {
                 // 인디케이터 측정값을 PLC에 쓰기 전에 데이터 읽기
                 if (!ReadIndicatorData(indicatorIndex)) {
-                    // 데이터 읽기 실패 시 오류 상태 보고
                     ReportIndicatorErrorToPLC(indicatorIndex, true);
                 }
             }
