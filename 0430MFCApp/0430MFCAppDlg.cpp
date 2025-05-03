@@ -455,7 +455,7 @@ void CMy0430MFCAppDlg::OnTimer(UINT_PTR nIDEvent)
     if (m_timerId == nIDEvent) {
         ExecuteSequentialOperation();
     }
-    else if (m_plcHeartbeatTimerId == nIDEvent) {   // 추가
+    else if (m_plcHeartbeatTimerId == nIDEvent) {   
         WritePLCHeartbeat();
     }
 
@@ -1672,12 +1672,21 @@ BOOL CMy0430MFCAppDlg::ReadCommandFromPLCToIndicator(int indicatorIndex)
             plcAddress, indicatorIndex + 1, commandValue, commandValue);
         AddLog(strLog);
 
-        // 명령이 0이 아닌 경우 인디케이터로 전송
+        // 명령이 0이 아닌 경우 모든 인디케이터로 전송
         if (commandValue != 0) {
-            SendCommandToIndicator(indicatorIndex, commandValue);
+            AddLog(_T("영점 명령 발견! 모든 인디케이터에 영점 명령을 전송합니다."));
 
-            // 명령을 처리한 후 PLC에 0을 다시 써서 초기화
-            ResetPLCCommand(indicatorIndex);
+            // 모든 인디케이터에 영점 명령 전송
+            for (int i = 0; i < m_indicatorCount; i++) {
+                if (m_indicators[i].connected) {
+                    SendCommandToIndicator(i, commandValue);
+                }
+            }
+
+            // 모든 5번 메모리 주소를 0으로 초기화
+            for (int i = 0; i < m_indicatorCount; i++) {
+                ResetPLCCommand(i);
+            }
         }
 
         return TRUE;
