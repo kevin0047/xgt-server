@@ -1584,6 +1584,7 @@ BOOL CMy0430MFCAppDlg::ReadCommandFromPLCToIndicator(int indicatorIndex)
         strPacket = _T("수신 패킷: ");
         for (int i = 0; i < min(recvSize, 50); i++) {
             CString temp;
+
             temp.Format(_T("%02X "), recvBuffer[i]);
             strPacket += temp;
         }
