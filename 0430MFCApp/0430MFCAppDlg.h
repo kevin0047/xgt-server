@@ -70,6 +70,7 @@ public:
     void DisconnectPLC();
     afx_msg void OnBnClickedButtonConnectPlc();
 public:
+    BOOL ReportIndicatorErrorToPLC(int indicatorIndex, bool bError);
     BOOL WriteIndicatorValueToPLC(int indicatorIndex);
     BOOL ReadCommandFromPLCToIndicator(int indicatorIndex);
     BOOL SendCommandToIndicator(int indicatorIndex, WORD command);
