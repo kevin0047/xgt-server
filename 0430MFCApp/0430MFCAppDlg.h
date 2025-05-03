@@ -156,5 +156,14 @@ private:
     void SaveLogToFile(LPCTSTR pszLog);     // 로그를 파일에 저장하는 함수
     void CreateDailyLogFile();              // 일별 로그 파일 생성 함수
     void LimitLogItems();                   // 로그 항목 수 제한 함수
+private:
+    UINT_PTR m_plcHeartbeatTimerId;    // PLC 하트비트 전용 타이머 ID
+    bool m_bHeartbeatValue;            // 현재 하트비트 값 (true=1, false=0)
+
+    // 함수 선언 추가  
+private:
+    BOOL WritePLCHeartbeat();          // PLC 하트비트 쓰기 함수
+    void StartPLCHeartbeat();          // PLC 하트비트 시작
+    void StopPLCHeartbeat();           // PLC 하트비트 중지
 };
 

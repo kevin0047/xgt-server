@@ -89,19 +89,21 @@ CMy0430MFCAppDlg::CMy0430MFCAppDlg(CWnd* pParent /*=nullptr*/)
     , m_strPLCIP(_T("192.168.250.111"))  // PLC IP 초기화
     , m_nPLCPort(2004)       // PLC 포트 초기화
     , m_strLogFilePath(_T(""))  // 로그 파일 경로 초기화
+    , m_plcHeartbeatTimerId(0)        // 추가
+    , m_bHeartbeatValue(false)
 {
     m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 }
 
 CMy0430MFCAppDlg::~CMy0430MFCAppDlg()
 {
-    // 타이머 해제
     if (m_timerId != 0)
         KillTimer(m_timerId);
 
-    // 소켓 연결 해제
-    for (size_t i = 0; i < m_indicatorCount; i++)
-    {
+    if (m_plcHeartbeatTimerId != 0)   // 추가
+        KillTimer(m_plcHeartbeatTimerId);
+
+    for (size_t i = 0; i < m_indicatorCount; i++) {
         if (m_indicators[i].connected)
             DisconnectIndicator(i);
     }
@@ -451,8 +453,10 @@ void CMy0430MFCAppDlg::UpdateListControl()
 void CMy0430MFCAppDlg::OnTimer(UINT_PTR nIDEvent)
 {
     if (m_timerId == nIDEvent) {
-        // 순차적 작업 실행
         ExecuteSequentialOperation();
+    }
+    else if (m_plcHeartbeatTimerId == nIDEvent) {   // 추가
+        WritePLCHeartbeat();
     }
 
     CDialogEx::OnTimer(nIDEvent);
@@ -504,18 +508,19 @@ void CMy0430MFCAppDlg::OnBnClickedButtonDisconnect()
 // 폴링 시작 버튼 클릭
 void CMy0430MFCAppDlg::OnBnClickedButtonStartPolling()
 {
-    UpdateData(TRUE);  // 컨트롤 -> 변수
+    UpdateData(TRUE);
 
-    // 타이머 설정
+    // 기존 타이머 설정
     m_timerId = SetTimer(1, m_delayMs, NULL);
     m_bPolling = true;
 
-    // 로그
+    // PLC 하트비트 시작 추가
+    StartPLCHeartbeat();
+
     CString strLog;
     strLog.Format(_T("데이터 폴링 시작: %d ms 간격"), m_delayMs);
     AddLog(strLog);
 
-    // 버튼 상태 업데이트
     m_btnStartPolling.EnableWindow(FALSE);
     m_btnStopPolling.EnableWindow(TRUE);
 }
@@ -523,15 +528,16 @@ void CMy0430MFCAppDlg::OnBnClickedButtonStartPolling()
 // 폴링 중지 버튼 클릭
 void CMy0430MFCAppDlg::OnBnClickedButtonStopPolling()
 {
-    // 타이머 중지
+    // 기존 타이머 중지
     KillTimer(m_timerId);
     m_timerId = 0;
     m_bPolling = false;
 
-    // 로그
+    // PLC 하트비트 중지 추가
+    StopPLCHeartbeat();
+
     AddLog(_T("데이터 폴링 중지"));
 
-    // 버튼 상태 업데이트
     m_btnStartPolling.EnableWindow(TRUE);
     m_btnStopPolling.EnableWindow(FALSE);
 }
@@ -2039,6 +2045,107 @@ BOOL CMy0430MFCAppDlg::ReportIndicatorErrorToPLC(int indicatorIndex, bool bError
     CString strLog;
     strLog.Format(_T("인디케이터 %d 오류 상태를 PLC 주소 D%d에 쓰기: %s"),
         indicatorIndex + 1, plcAddress, bError ? _T("오류(1)") : _T("정상(0)"));
+    AddLog(strLog);
+
+    return TRUE;
+}
+
+// PLC 하트비트 시작 함수 추가
+void CMy0430MFCAppDlg::StartPLCHeartbeat()
+{
+    // 1초(1000ms) 간격으로 하트비트 타이머 설정
+    m_plcHeartbeatTimerId = SetTimer(2, 1000, NULL);
+    m_bHeartbeatValue = false;  // 초기값 0
+
+    AddLog(_T("PLC 하트비트 전송 시작"));
+}
+
+// PLC 하트비트 중지 함수 추가
+void CMy0430MFCAppDlg::StopPLCHeartbeat()
+{
+    if (m_plcHeartbeatTimerId != 0) {
+        KillTimer(m_plcHeartbeatTimerId);
+        m_plcHeartbeatTimerId = 0;
+        AddLog(_T("PLC 하트비트 전송 중지"));
+    }
+}
+
+// PLC 하트비트 쓰기 함수 추가
+BOOL CMy0430MFCAppDlg::WritePLCHeartbeat()
+{
+    if (!m_plcSocket.IsConnected()) {
+        return FALSE;
+    }
+
+    // 값 토글 (0과 1을 번갈아 사용)
+    m_bHeartbeatValue = !m_bHeartbeatValue;
+
+    // PLC 메모리 주소 D6004
+    WORD plcAddress = 6004;
+
+    // XGT 전용 프로토콜 패킷 구성
+    BYTE header[20] = {
+        0x4C, 0x53, 0x49, 0x53, 0x2D, 0x58, 0x47, 0x54, 0x00, 0x00, // "LSIS-XGT"
+        0x00, 0x00,  // PLC Info
+        0xA0,        // CPU Info
+        0x33,        // Source of Frame (0x33: Client->Server)
+        0x00, 0x06,  // Invoke ID (하트비트용 고유 ID)
+        0x00, 0x00,  // Length (나중에 설정)
+        0x00,        // FEnet Position
+        0x00         // Reserved
+    };
+
+    BYTE command[2] = { 0x58, 0x00 };  // Write Request
+    BYTE dataType[2] = { 0x02, 0x00 }; // Word 타입
+    BYTE reserved[2] = { 0x00, 0x00 };
+    BYTE varCount[2] = { 0x01, 0x00 };
+
+    CString strVarName;
+    strVarName.Format(_T("%%DW%d"), plcAddress);
+    CT2CA pszVarName(strVarName);
+    int varNameLen = strlen(pszVarName);
+    BYTE varNameLength[2] = { (BYTE)varNameLen, 0x00 };
+
+    std::vector<BYTE> varName(varNameLen);
+    memcpy(varName.data(), pszVarName, varNameLen);
+
+    BYTE dataSize[2] = { 0x02, 0x00 };
+
+    // 하트비트 값 (0 또는 1)
+    BYTE data[2];
+    data[0] = m_bHeartbeatValue ? 0x01 : 0x00;
+    data[1] = 0x00;
+
+    // 총 패킷 길이 계산
+    int dataLength = sizeof(command) + sizeof(dataType) + sizeof(reserved) +
+        sizeof(varCount) + sizeof(varNameLength) + varNameLen +
+        sizeof(dataSize) + sizeof(data);
+
+    header[16] = dataLength & 0xFF;
+    header[17] = (dataLength >> 8) & 0xFF;
+
+    // 전체 패킷 구성
+    std::vector<BYTE> packet;
+    packet.insert(packet.end(), header, header + sizeof(header));
+    packet.insert(packet.end(), command, command + sizeof(command));
+    packet.insert(packet.end(), dataType, dataType + sizeof(dataType));
+    packet.insert(packet.end(), reserved, reserved + sizeof(reserved));
+    packet.insert(packet.end(), varCount, varCount + sizeof(varCount));
+    packet.insert(packet.end(), varNameLength, varNameLength + sizeof(varNameLength));
+    packet.insert(packet.end(), varName.begin(), varName.end());
+    packet.insert(packet.end(), dataSize, dataSize + sizeof(dataSize));
+    packet.insert(packet.end(), data, data + sizeof(data));
+
+    // 요청 전송
+    if (!m_plcSocket.SendData(packet.data(), packet.size())) {
+        CString strError;
+        strError.Format(_T("PLC 하트비트 전송 실패 (D%d에 %d 쓰기)"), plcAddress, m_bHeartbeatValue ? 1 : 0);
+        AddLog(strError);
+        return FALSE;
+    }
+
+    CString strLog;
+    strLog.Format(_T("PLC 하트비트 전송: D%d에 %d 쓰기"), plcAddress, m_bHeartbeatValue ? 1 : 0);
     AddLog(strLog);
 
     return TRUE;
