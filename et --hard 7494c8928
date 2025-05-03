@@ -1,0 +1,203 @@
+[33mcommit 048514ba8db085d43d915152208e9b0ddf270086[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m, [m[1;31morigin/master[m[33m)[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Sat May 3 17:27:55 2025 +0900
+
+    테스트 프로그램 코드 추가
+
+[33mcommit c87e9a0691f65219b1fdf82fa3587a8876a53c7d[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Sat May 3 17:16:55 2025 +0900
+
+    리셋 안하도록 수정
+
+[33mcommit 5c9ff0988ee55b8a37782f7cffe2a767348c199f[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Sat May 3 16:50:00 2025 +0900
+
+    2차수정 영점이 안됨
+
+[33mcommit 4682829943578a12584ceed0f4add27d3511cc16[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Sat May 3 16:25:17 2025 +0900
+
+    1차 수정 병렬통신
+
+[33mcommit 7494c89287a6190d9cb4e721b1583f70f2c52934[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Sat May 3 16:00:19 2025 +0900
+
+    영점 변경까지 마지막. 이 커밋으로 복구할것.
+
+[33mcommit 100202ea0819460e10fe6e1d5b9447311cb08c8f[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Sat May 3 14:48:24 2025 +0900
+
+    영점 명령을 한번에 보내도록 수정
+
+[33mcommit b74a7dd7551fd41b2fc4792ac5c0203ef3a8d777[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Sat May 3 14:18:53 2025 +0900
+
+    6004번에 하트비트 쓰기
+
+[33mcommit c62792cf94b40f36d62149a533a77d65e248d63e[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Sat May 3 10:50:43 2025 +0900
+
+    연결이 끊기고 다시 연결되었을때 연결상태 불안정한 문제 해결
+
+[33mcommit 5f30af36c96bb3c7f55ef37ebfb181067aa1d654[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Sat May 3 10:32:30 2025 +0900
+
+    에러 전송 1차수정
+
+[33mcommit 2f8d896a68b96c6944d96efe24dd097ece585912[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Sat May 3 10:26:12 2025 +0900
+
+    에러추가
+
+[33mcommit 11198b9a13e8b244702334ed0e53fa742b67e6e1[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Sat May 3 08:25:55 2025 +0900
+
+    메모리 주소 6001로 변경
+
+[33mcommit 3f0d910855bbc0c4697310c1af6ea6a2b9a4dea1[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Fri May 2 14:36:02 2025 +0900
+
+    원점 요청까지 적용됨
+
+[33mcommit 7032625aa43bd455b435015d151a498d291e108d[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Fri May 2 13:27:21 2025 +0900
+
+    원점 안잡힘
+
+[33mcommit 7cfbef33759990c9725be393cfc9cdf4d3d8d527[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Fri May 2 11:08:49 2025 +0900
+
+    로그 기능추가
+
+[33mcommit 1b14eb85a24810f90caddabb0c9d0439faaf798b[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Fri May 2 10:33:19 2025 +0900
+
+    dw메모리로 통일
+
+[33mcommit d7c408622a1813f09e1dbeaa929cd2e8c24c7679[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Fri May 2 10:29:45 2025 +0900
+
+    쓰기 성공
+
+[33mcommit e4f3bdd9e36f731dc97cd54f5f792bd72736b563[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Fri May 2 10:20:30 2025 +0900
+
+    리백
+
+[33mcommit dd7f467464859a17b628841e50279e56cb3f2575[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Fri May 2 09:39:20 2025 +0900
+
+    설명서 시발 삭제
+
+[33mcommit f80a9de1faa98849086204be56df7a26f8879fe3[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Fri May 2 09:39:01 2025 +0900
+
+    메모리 주소 변경
+
+[33mcommit c0d03e77d75a9587c628f5db183603eb0fced56c[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Fri May 2 08:50:19 2025 +0900
+
+    3차수정 주소 지정과 값 인코딩
+
+[33mcommit 52a30e01a3cdfe2f0e0202cf146bfb4e2af5d2b7[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Thu May 1 10:58:00 2025 +0900
+
+    설명서 추가
+
+[33mcommit f20f9a0ccf696ac038ecef890492670d2f65d924[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Thu May 1 10:29:52 2025 +0900
+
+    데이터가 안써지는 문제
+
+[33mcommit 83a3032fec7f0a4c1b243497afb95915db52e1f0[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Thu May 1 09:27:03 2025 +0900
+
+    타임아웃 추가
+
+[33mcommit d6c6c9d9d0350f3a4dec3629b8521d16088d5130[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Thu May 1 08:36:40 2025 +0900
+
+    3차 수정
+
+[33mcommit d0098b6328a66f4a99fb93314e3ea06703f22c01[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Wed Apr 30 19:34:26 2025 +0900
+
+    2차수정
+
+[33mcommit b63f74d63febd035029c7b177976d4c830a88d57[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Wed Apr 30 18:01:24 2025 +0900
+
+    2차 수정
+
+[33mcommit 49eef758e1311d069e3336145d01347b376f39be[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Wed Apr 30 14:49:45 2025 +0900
+
+    set 수정
+
+[33mcommit ef45f0fb1c309ee95b2507d973b0f46f1c0d4942[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Wed Apr 30 14:44:35 2025 +0900
+
+    1차 수정
+
+[33mcommit d09d9b9eb70265d1b422213b2349338e1e5d7e66[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Wed Apr 30 14:28:48 2025 +0900
+
+    1차 수정
+
+[33mcommit e00fa7c27ed4af7abcd4c38c9aeacff11b5bb72a[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Wed Apr 30 14:07:41 2025 +0900
+
+    set 설정 수정
+
+[33mcommit d2c7499447f1cf7679684a8a3a1ffec4a8efd341[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Wed Apr 30 14:00:54 2025 +0900
+
+    set 추가
+
+[33mcommit 7e74fd0eaf010f72b2c7787d0dc34975e8444144[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Wed Apr 30 13:55:42 2025 +0900
+
+    설명서 추가
+
+[33mcommit 5ab423450de7bb2f23ba18e244db9e65eef8842b[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Wed Apr 30 13:53:54 2025 +0900
+
+    초기 커밋.
+
+[33mcommit f288e41ed1f4b351dd67c91d1ceb69c2e4e6064b[m
+Author: kevin0047 <ybnam0047@gmail.com>
+Date:   Wed Apr 30 13:53:50 2025 +0900
+
+    .gitattributes 및 .gitignore을(를) 추가합니다.

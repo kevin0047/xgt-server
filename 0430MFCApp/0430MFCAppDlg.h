@@ -74,7 +74,7 @@ public:
     BOOL WriteIndicatorValueToPLC(int indicatorIndex);
     BOOL ReadCommandFromPLCToIndicator(int indicatorIndex);
     BOOL SendCommandToIndicator(int indicatorIndex, WORD command);
-    BOOL ResetPLCCommand(int indicatorIndex);
+
     CMy0430MFCAppDlg(CWnd* pParent = nullptr);	// 표준 생성자입니다.
     virtual ~CMy0430MFCAppDlg();
 
