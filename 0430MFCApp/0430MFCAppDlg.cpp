@@ -1728,8 +1728,8 @@ BOOL CMy0430MFCAppDlg::ExecuteSequentialOperation()
     }
 
     // 작업 번호에 따라 인디케이터 인덱스와 작업 유형 계산
-    int indicatorIndex = m_nCurrentOperation / 2;  // 0, 0, 1, 1, 2, 2, ...
-    bool isReadCommand = (m_nCurrentOperation % 2) != 0;  // 홀수면 명령 읽기, 짝수면 측정값 쓰기
+    int indicatorIndex = m_nCurrentOperation / 2;
+    bool isReadCommand = (m_nCurrentOperation % 2) != 0;
 
     // PLC 연결 상태 먼저 확인
     if (!m_plcSocket.IsConnected() && m_bPolling) {
@@ -1745,39 +1745,41 @@ BOOL CMy0430MFCAppDlg::ExecuteSequentialOperation()
     }
 
     // 유효한 인디케이터 인덱스 확인
-    if (indicatorIndex < m_indicatorCount && m_indicators[indicatorIndex].connected) {
-        if (isReadCommand) {
-            // PLC에서 명령 읽어서 인디케이터로 전송
-            if (!ReadCommandFromPLCToIndicator(indicatorIndex)) {
-                CString strError;
-                strError.Format(_T("인디케이터 %d 명령 읽기 실패"), indicatorIndex + 1);
-                AddLog(strError);
+    if (indicatorIndex < m_indicatorCount) {
+        // 인디케이터 연결 상태 확인
+        if (!m_indicators[indicatorIndex].connected) {
+            // 연결 끊어진 경우 - 계속해서 오류 상태 보고
+            ReportIndicatorErrorToPLC(indicatorIndex, true);
 
-                // 오류 상태를 PLC에 보고
-                ReportIndicatorErrorToPLC(indicatorIndex, true);
+            // 재연결 시도 (선택사항)
+            if (m_bPolling && indicatorIndex < m_indicatorCount) {
+                ConnectToIndicator(indicatorIndex);
             }
         }
         else {
-            // 인디케이터 측정값을 PLC에 쓰기 전에 데이터 읽기
-            if (!ReadIndicatorData(indicatorIndex)) {
-                // 데이터 읽기 실패 시 오류 상태 보고
-                ReportIndicatorErrorToPLC(indicatorIndex, true);
+            // 인디케이터가 연결된 경우
+            if (isReadCommand) {
+                // PLC에서 명령 읽어서 인디케이터로 전송
+                if (!ReadCommandFromPLCToIndicator(indicatorIndex)) {
+                    CString strError;
+                    strError.Format(_T("인디케이터 %d 명령 읽기 실패"), indicatorIndex + 1);
+                    AddLog(strError);
 
-                if (!m_indicators[indicatorIndex].connected && m_bPolling) {
-                    ConnectToIndicator(indicatorIndex);
+                    // 오류 상태를 PLC에 보고
+                    ReportIndicatorErrorToPLC(indicatorIndex, true);
+                }
+            }
+            else {
+                // 인디케이터 측정값을 PLC에 쓰기 전에 데이터 읽기
+                if (!ReadIndicatorData(indicatorIndex)) {
+                    // 데이터 읽기 실패 시 오류 상태 보고
+                    ReportIndicatorErrorToPLC(indicatorIndex, true);
                 }
             }
         }
     }
-    else if (m_bPolling && indicatorIndex < m_indicatorCount) {
-        // 연결되지 않은 인디케이터 상태 보고
-        ReportIndicatorErrorToPLC(indicatorIndex, true);
 
-        // 연결 시도
-        ConnectToIndicator(indicatorIndex);
-    }
-
-    // 다음 작업으로 이동 (연결된 인디케이터 수에 맞게 순환)
+    // 다음 작업으로 이동
     m_nCurrentOperation = (m_nCurrentOperation + 1) % maxOperations;
 
     return TRUE;
