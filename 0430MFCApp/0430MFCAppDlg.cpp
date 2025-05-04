@@ -82,7 +82,7 @@ BOOL CModbusTcpSocket::SendData(const BYTE* pData, int nLength)
 // CMy0430MFCAppDlg 대화 상자
 CMy0430MFCAppDlg::CMy0430MFCAppDlg(CWnd* pParent /*=nullptr*/)
     : CDialogEx(IDD_MY0430MFCAPP_DIALOG, pParent)
-    , m_delayMs(1000) // 기본 딜레이 1초
+    , m_delayMs(20) 
     , m_bPolling(false)
     , m_timerId(0)
     , m_indicatorCount(0)
@@ -190,9 +190,17 @@ BOOL CMy0430MFCAppDlg::OnInitDialog()
 
     // 초기 로그
     AddLog(_T("인디케이터 통신 프로그램이 시작되었습니다."));
+
     // PLC 상태 초기화
     m_staticPLCStatus.SetWindowText(_T("PLC 상태: 연결 안됨"));
     m_nCurrentOperation = 0;  // 작업 번호 초기화
+
+    // 프로그램 시작 시 자동으로 인디케이터 연결, PLC 연결, 폴링 시작
+    PostMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON_CONNECT, BN_CLICKED), (LPARAM)GetDlgItem(IDC_BUTTON_CONNECT)->GetSafeHwnd());
+    PostMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON_CONNECT_PLC, BN_CLICKED), (LPARAM)GetDlgItem(IDC_BUTTON_CONNECT_PLC)->GetSafeHwnd());
+
+    // PLC와 인디케이터 연결 후 약간의 지연 시간을 두고 폴링 시작
+    SetTimer(3, 2000, NULL); // 타이머 ID 3 사용 (기존 타이머 ID는 1, 2)
 
     return TRUE;  // 포커스를 컨트롤에 설정하지 않으면 TRUE를 반환합니다.
 }
@@ -447,8 +455,14 @@ void CMy0430MFCAppDlg::OnTimer(UINT_PTR nIDEvent)
     if (m_timerId == nIDEvent) {
         ExecuteSequentialOperation();
     }
-    else if (m_plcHeartbeatTimerId == nIDEvent) {   
+    else if (m_plcHeartbeatTimerId == nIDEvent) {
         WritePLCHeartbeat();
+    }
+    else if (nIDEvent == 3) {
+        // 자동 폴링 시작 타이머
+        KillTimer(3);
+        PostMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON_START_POLLING, BN_CLICKED),
+            (LPARAM)GetDlgItem(IDC_BUTTON_START_POLLING)->GetSafeHwnd());
     }
 
     CDialogEx::OnTimer(nIDEvent);
