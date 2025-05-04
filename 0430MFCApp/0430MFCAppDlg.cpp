@@ -360,9 +360,7 @@ void CMy0430MFCAppDlg::DisconnectIndicator(int index)
 // ModBus TCP를 통한 인디케이터 데이터 읽기
 BOOL CMy0430MFCAppDlg::ReadAllIndicatorData()
 {
-    CString strLog;
-    strLog.Format(_T("모든 인디케이터에 동시에 데이터 요청 시작..."));
-    AddLog(strLog);
+
 
     // 모든 인디케이터에 동시에 요청 보내기
     for (int i = 0; i < m_indicatorCount; i++) {
@@ -1971,6 +1969,26 @@ BOOL CMy0430MFCAppDlg::ReportIndicatorErrorToPLC(int indicatorIndex, bool bError
         return FALSE;
     }
 
+    // 오류 상태 변화 추적
+    static bool previousErrorState[MAX_INDICATORS] = { false };
+
+    // 오류가 발생하거나 복구되었을 때만 로그 출력
+    if (bError != previousErrorState[indicatorIndex]) {
+        CString strLog;
+        if (bError) {
+            strLog.Format(_T("인디케이터 %d 오류 발생, PLC에 보고됨"),
+                indicatorIndex + 1);
+        }
+        else {
+            strLog.Format(_T("인디케이터 %d 오류 복구됨, PLC에 보고됨"),
+                indicatorIndex + 1);
+        }
+        AddLog(strLog);
+    }
+
+    // 현재 상태 저장
+    previousErrorState[indicatorIndex] = bError;
+
     // PLC 메모리 주소 계산 (D6002 + 인디케이터 인덱스 * 10)
     WORD plcAddress = 6002 + (indicatorIndex * 10);
 
@@ -2035,10 +2053,7 @@ BOOL CMy0430MFCAppDlg::ReportIndicatorErrorToPLC(int indicatorIndex, bool bError
         return FALSE;
     }
 
-    CString strLog;
-    strLog.Format(_T("인디케이터 %d 오류 상태를 PLC 주소 D%d에 쓰기: %s"),
-        indicatorIndex + 1, plcAddress, bError ? _T("오류(1)") : _T("정상(0)"));
-    AddLog(strLog);
+   
 
     return TRUE;
 }
