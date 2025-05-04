@@ -113,7 +113,7 @@ protected:
     // ModBus TCP 통신 함수
     BOOL ConnectToIndicator(int index);
     void DisconnectIndicator(int index);
-    BOOL ReadIndicatorData(int index);
+    BOOL ReadAllIndicatorData();
     void UpdateListControl();
 
     // 로그 추가 함수
@@ -165,5 +165,6 @@ private:
     BOOL WritePLCHeartbeat();          // PLC 하트비트 쓰기 함수
     void StartPLCHeartbeat();          // PLC 하트비트 시작
     void StopPLCHeartbeat();           // PLC 하트비트 중지
+    BOOL WriteAllIndicatorValuesToPLCContinuous();
 };
 

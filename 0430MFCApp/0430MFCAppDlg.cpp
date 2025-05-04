@@ -358,45 +358,39 @@ void CMy0430MFCAppDlg::DisconnectIndicator(int index)
 }
 
 // ModBus TCP를 통한 인디케이터 데이터 읽기
-BOOL CMy0430MFCAppDlg::ReadIndicatorData(int indicatorIndex)
+BOOL CMy0430MFCAppDlg::ReadAllIndicatorData()
 {
-    if (indicatorIndex < 0 || indicatorIndex >= (int)m_indicatorCount || !m_indicators[indicatorIndex].connected) {
-        return FALSE;
-    }
-
-    IndicatorInfo& indicator = m_indicators[indicatorIndex];
-
-    // ModBus TCP 요청 패킷 구성
-    BYTE requestPacket[12];
-    memset(requestPacket, 0, sizeof(requestPacket));
-
-    // MBAP 헤더 (7 바이트)
-    WORD transactionId = g_transactionId++;
-    requestPacket[0] = (transactionId >> 8) & 0xFF;  // Transaction ID High
-    requestPacket[1] = transactionId & 0xFF;         // Transaction ID Low
-    requestPacket[2] = 0x00;                         // Protocol ID High
-    requestPacket[3] = 0x00;                         // Protocol ID Low
-    requestPacket[4] = 0x00;                         // Length High
-    requestPacket[5] = 0x06;                         // Length Low (6 바이트)
-    requestPacket[6] = 0x01;                         // Unit ID
-
-    // PDU (5 바이트)
-    requestPacket[7] = MODBUS_FC_READ_HOLDING_REGISTERS;  // Function Code
-    requestPacket[8] = 0x00;                              // Starting Address High
-    requestPacket[9] = 0x00;                              // Starting Address Low
-    requestPacket[10] = 0x00;                             // Number of Registers High
-    requestPacket[11] = 0x0A;                             // Number of Registers Low (10개 레지스터)
-
-    // 요청 전송
     CString strLog;
-    strLog.Format(_T("인디케이터 %s:%d로 데이터 요청 전송"), indicator.ip, indicator.port);
-    AddLog(strLog, requestPacket, sizeof(requestPacket));
+    strLog.Format(_T("모든 인디케이터에 동시에 데이터 요청 시작..."));
+    AddLog(strLog);
 
-    if (!indicator.socket.SendData(requestPacket, sizeof(requestPacket))) {
-        CString strError;
-        strError.Format(_T("인디케이터 %s:%d 데이터 요청 전송 실패"), indicator.ip, indicator.port);
-        AddLog(strError);
-        return FALSE;
+    // 모든 인디케이터에 동시에 요청 보내기
+    for (int i = 0; i < m_indicatorCount; i++) {
+        if (m_indicators[i].connected && m_indicators[i].socket.IsConnected()) {
+            // ModBus TCP 요청 패킷 구성
+            BYTE requestPacket[12];
+            memset(requestPacket, 0, sizeof(requestPacket));
+
+            // MBAP 헤더 (7 바이트)
+            WORD transactionId = g_transactionId++;
+            requestPacket[0] = (transactionId >> 8) & 0xFF;  // Transaction ID High
+            requestPacket[1] = transactionId & 0xFF;         // Transaction ID Low
+            requestPacket[2] = 0x00;                         // Protocol ID High
+            requestPacket[3] = 0x00;                         // Protocol ID Low
+            requestPacket[4] = 0x00;                         // Length High
+            requestPacket[5] = 0x06;                         // Length Low (6 바이트)
+            requestPacket[6] = 0x01;                         // Unit ID
+
+            // PDU (5 바이트)
+            requestPacket[7] = MODBUS_FC_READ_HOLDING_REGISTERS;  // Function Code
+            requestPacket[8] = 0x00;                              // Starting Address High
+            requestPacket[9] = 0x00;                              // Starting Address Low
+            requestPacket[10] = 0x00;                             // Number of Registers High
+            requestPacket[11] = 0x0A;                             // Number of Registers Low (10개 레지스터)
+
+            // 요청 전송 (바로 전송만 하고 응답은 OnSocketReceive에서 처리)
+            m_indicators[i].socket.SendData(requestPacket, sizeof(requestPacket));
+        }
     }
 
     return TRUE;
@@ -1654,19 +1648,131 @@ BOOL CMy0430MFCAppDlg::SendCommandToIndicator(int indicatorIndex, WORD command)
 
     return TRUE;
 }
-BOOL CMy0430MFCAppDlg::ExecuteSequentialOperation()
+BOOL CMy0430MFCAppDlg::WriteAllIndicatorValuesToPLCContinuous()
 {
-    // 연결된 인디케이터 수에 맞게 최대 작업 수 계산
-    int maxOperations = m_indicatorCount * 2;  // 각 인디케이터 당 2개 작업(읽기/쓰기)
-
-    // 작업 번호가 최대 작업 수를 초과하면 초기화
-    if (m_nCurrentOperation >= maxOperations) {
-        m_nCurrentOperation = 0;
+    if (!m_plcSocket.IsConnected()) {
+        AddLog(_T("PLC에 연결되어 있지 않아 데이터를 쓸 수 없습니다."));
+        return FALSE;
     }
 
-    // 작업 번호에 따라 인디케이터 인덱스와 작업 유형 계산
-    int indicatorIndex = m_nCurrentOperation / 2;
-    bool isReadCommand = (m_nCurrentOperation % 2) != 0;
+    try {
+        // XGT 전용 프로토콜 패킷 구성 - 연속 쓰기(블록 단위)
+        // 1. Company ID + 헤더 (20 바이트)
+        BYTE header[20] = {
+            0x4C, 0x53, 0x49, 0x53, 0x2D, 0x58, 0x47, 0x54, 0x00, 0x00, // "LSIS-XGT"
+            0x00, 0x00,  // PLC Info
+            0xA0,        // CPU Info
+            0x33,        // Source of Frame (0x33: Client->Server)
+            0x00, 0x0A,  // Invoke ID (임의 값)
+            0x00, 0x00,  // Length (나중에 설정)
+            0x00,        // FEnet Position
+            0x00         // Reserved
+        };
+
+        // 2. 명령어 (Block Write Request: 0x005C)
+        BYTE command[2] = { 0x5C, 0x00 };
+
+        // 3. 데이터 타입 (Word: 0x0002)
+        BYTE dataType[2] = { 0x02, 0x00 };
+
+        // 4. 예약 영역
+        BYTE reserved[2] = { 0x00, 0x00 };
+
+        // 5. 시작 변수 이름 (첫 번째 인디케이터의 PLC 주소)
+        CString strStartAddr;
+        strStartAddr.Format(_T("%%DW6001"));  // 시작 주소는 항상 D6001
+        CT2CA pszStartAddr(strStartAddr);
+        int startAddrLen = strlen(pszStartAddr);
+        BYTE startAddrLength[2] = { (BYTE)startAddrLen, 0x00 };
+
+        // 6. 시작 변수 이름 문자열
+        std::vector<BYTE> startAddrName(startAddrLen);
+        memcpy(startAddrName.data(), pszStartAddr, startAddrLen);
+
+        // 7. 데이터 개수 (인디케이터 수 * 10) - 각 인디케이터마다 10워드씩 할당
+        int dataCount = m_indicatorCount * 10;
+        BYTE dataCountBytes[2] = { (BYTE)(dataCount & 0xFF), (BYTE)((dataCount >> 8) & 0xFF) };
+
+        // 8. 데이터 크기 (워드 수 * 2)
+        int dataSize = dataCount * 2;  // 각 워드는 2바이트
+        BYTE dataSizeBytes[2] = { (BYTE)(dataSize & 0xFF), (BYTE)((dataSize >> 8) & 0xFF) };
+
+        // 9. 데이터 - 모든 인디케이터의 측정값을 연속해서 구성
+        std::vector<BYTE> dataBuffer(dataSize, 0);  // 모든 바이트 0으로 초기화
+
+        // 연결된 인디케이터의 측정값을 해당 위치에 설정
+        for (int i = 0; i < m_indicatorCount; i++) {
+            if (m_indicators[i].connected) {
+                // 각 인디케이터의 데이터는 10워드 간격으로 저장
+                // 측정값은 첫 번째 워드에 저장 (D6001, D6011, D6021, ...)
+                int offset = i * 20;  // 워드 위치 * 2바이트
+
+                // 측정값 (16비트) 저장
+                dataBuffer[offset] = (m_indicators[i].measuredValue >> 0) & 0xFF;  // 최하위 바이트
+                dataBuffer[offset + 1] = (m_indicators[i].measuredValue >> 8) & 0xFF;  // 상위 바이트
+            }
+        }
+
+        // 총 패킷 길이 계산
+        int dataLength = sizeof(command) + sizeof(dataType) + sizeof(reserved) +
+            sizeof(startAddrLength) + startAddrLen +
+            sizeof(dataCountBytes) + sizeof(dataSizeBytes) + dataBuffer.size();
+
+        // 헤더의 Length 필드 업데이트
+        header[16] = dataLength & 0xFF;
+        header[17] = (dataLength >> 8) & 0xFF;
+
+        // 전체 패킷 구성
+        std::vector<BYTE> packet;
+        packet.insert(packet.end(), header, header + sizeof(header));
+        packet.insert(packet.end(), command, command + sizeof(command));
+        packet.insert(packet.end(), dataType, dataType + sizeof(dataType));
+        packet.insert(packet.end(), reserved, reserved + sizeof(reserved));
+        packet.insert(packet.end(), startAddrLength, startAddrLength + sizeof(startAddrLength));
+        packet.insert(packet.end(), startAddrName.begin(), startAddrName.end());
+        packet.insert(packet.end(), dataCountBytes, dataCountBytes + sizeof(dataCountBytes));
+        packet.insert(packet.end(), dataSizeBytes, dataSizeBytes + sizeof(dataSizeBytes));
+        packet.insert(packet.end(), dataBuffer.begin(), dataBuffer.end());
+
+        // 요청 전송
+        if (!m_plcSocket.SendData(packet.data(), packet.size())) {
+            CString strError;
+            strError.Format(_T("PLC에 인디케이터 측정값 연속 쓰기 실패"));
+            AddLog(strError);
+            return FALSE;
+        }
+
+        CString strLog;
+        strLog.Format(_T("모든 인디케이터 측정값을 PLC 주소 D6001부터 연속으로 쓰기 요청 (XGT 프로토콜, 블록 쓰기, %d 워드)"),
+            dataCount);
+        AddLog(strLog);
+
+        return TRUE;
+    }
+    catch (CException* e) {
+        TCHAR szError[1024];
+        e->GetErrorMessage(szError, 1024);
+        CString strError;
+        strError.Format(_T("PLC 연속 데이터 쓰기 중 예외 발생: %s"), szError);
+        AddLog(strError);
+        e->Delete();
+        return FALSE;
+    }
+}
+
+
+
+BOOL CMy0430MFCAppDlg::ExecuteSequentialOperation()
+{
+    // 작업 상태 관리 - 3단계로 간단하게 구성
+    // 0: PLC 명령 읽기
+    // 1: 모든 인디케이터 데이터 읽기
+    // 2: 모든 인디케이터 데이터를 PLC에 쓰기
+
+    // 작업 번호가 최대 작업 수를 초과하면 초기화
+    if (m_nCurrentOperation >= 3) {
+        m_nCurrentOperation = 0;
+    }
 
     // PLC 연결 상태 먼저 확인
     if (!m_plcSocket.IsConnected() && m_bPolling) {
@@ -1674,59 +1780,28 @@ BOOL CMy0430MFCAppDlg::ExecuteSequentialOperation()
         strLog.Format(_T("PLC 연결이 끊어짐. 재연결 시도: %s:%d"), m_strPLCIP, m_nPLCPort);
         AddLog(strLog);
         ConnectToPLC(m_strPLCIP, m_nPLCPort);
-        m_nCurrentOperation = (m_nCurrentOperation + 1) % maxOperations;
         return TRUE;
     }
 
-    // 유효한 인디케이터 인덱스 확인
-    if (indicatorIndex < m_indicatorCount) {
-        IndicatorInfo& indicator = m_indicators[indicatorIndex];
-
-        // 연결 상태를 더 정확하게 확인
-        bool isConnected = indicator.connected && indicator.socket.IsConnected();
-
-        if (!isConnected) {
-            // 연결 끊어진 경우 - 오류 상태 보고
-            ReportIndicatorErrorToPLC(indicatorIndex, true);
-
-            // 재연결 시도 (짧은 지연 추가)
-            if (m_bPolling) {
-                static DWORD lastReconnectAttempt[32] = { 0 }; // 각 인디케이터별 마지막 연결 시도 시간
-                DWORD currentTime = GetTickCount();
-
-                // 마지막 연결 시도에서 최소 5초 경과 후 재시도
-                if (currentTime - lastReconnectAttempt[indicatorIndex] > 5000) {
-                    ConnectToIndicator(indicatorIndex);
-                    lastReconnectAttempt[indicatorIndex] = currentTime;
-                }
-            }
-
-            // 연결 시도 후 다음 작업 건너뛰기 (안정화 시간 확보)
-            m_nCurrentOperation = (m_nCurrentOperation + 2) % maxOperations;
-            return TRUE;
+    // 단계별 작업 수행
+    switch (m_nCurrentOperation) {
+    case 0: // PLC 명령 읽기
+        if (m_plcSocket.IsConnected()) {
+            ReadCommandFromPLCToIndicator(0);
         }
-        else {
-            // 인디케이터가 연결된 경우
-            if (isReadCommand) {
-                // PLC에서 명령 읽어서 인디케이터로 전송
-                if (!ReadCommandFromPLCToIndicator(indicatorIndex)) {
-                    CString strError;
-                    strError.Format(_T("인디케이터 %d 명령 읽기 실패"), indicatorIndex + 1);
-                    AddLog(strError);
-                    ReportIndicatorErrorToPLC(indicatorIndex, true);
-                }
-            }
-            else {
-                // 인디케이터 측정값을 PLC에 쓰기 전에 데이터 읽기
-                if (!ReadIndicatorData(indicatorIndex)) {
-                    ReportIndicatorErrorToPLC(indicatorIndex, true);
-                }
-            }
-        }
+        break;
+
+    case 1: // 모든 인디케이터 데이터 읽기
+        ReadAllIndicatorData();
+        break;
+
+    case 2: // 모든 인디케이터 데이터를 PLC에 쓰기
+        WriteAllIndicatorValuesToPLCContinuous();
+        break;
     }
 
     // 다음 작업으로 이동
-    m_nCurrentOperation = (m_nCurrentOperation + 1) % maxOperations;
+    m_nCurrentOperation = (m_nCurrentOperation + 1) % 3;
 
     return TRUE;
 }
