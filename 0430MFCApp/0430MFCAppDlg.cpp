@@ -200,7 +200,7 @@ BOOL CMy0430MFCAppDlg::OnInitDialog()
     PostMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON_CONNECT_PLC, BN_CLICKED), (LPARAM)GetDlgItem(IDC_BUTTON_CONNECT_PLC)->GetSafeHwnd());
 
     // PLC와 인디케이터 연결 후 약간의 지연 시간을 두고 폴링 시작
-    SetTimer(3, 2000, NULL); // 타이머 ID 3 사용 (기존 타이머 ID는 1, 2)
+    SetTimer(3, 2000, NULL); 
 
     return TRUE;  // 포커스를 컨트롤에 설정하지 않으면 TRUE를 반환합니다.
 }
@@ -966,8 +966,6 @@ LRESULT CMy0430MFCAppDlg::OnSocketClose(WPARAM wParam, LPARAM lParam)
         strLog.Format(_T("PLC 연결이 종료되었습니다. 원인: %s"), strErrorReason);
         AddLog(strLog);
 
-        // 소켓 객체 상태는 이미 CModbusTcpSocket::OnClose에서 업데이트됨
-        // (m_bConnected = false)
 
         // UI 업데이트
         m_staticPLCStatus.SetWindowText(_T("PLC 상태: 연결 안됨"));
@@ -1262,7 +1260,7 @@ BOOL CMy0430MFCAppDlg::WriteIndicatorValueToPLC(int indicatorIndex)
         // PLC 메모리 주소 계산 (각 인디케이터는 10 간격으로 D6001부터 시작)
         WORD plcAddress = 6001 + (indicatorIndex * 10);
 
-        // DD에서 DW로 변경 - 이제 Word 타입 사용
+        // DW로 변경 -  Word 타입 사용
 
         // XGT 전용 프로토콜 패킷 구성 - 연속 쓰기(바이트 단위)
 
@@ -1292,7 +1290,7 @@ BOOL CMy0430MFCAppDlg::WriteIndicatorValueToPLC(int indicatorIndex)
 
         // 6. 변수 이름 길이 
         CString strVarName;
-        strVarName.Format(_T("%%DW%d"), plcAddress); // DD에서 DW로 변경
+        strVarName.Format(_T("%%DW%d"), plcAddress); // DW로 변경
         CT2CA pszVarName(strVarName);
         int varNameLen = strlen(pszVarName);
         BYTE varNameLength[2] = { (BYTE)varNameLen, 0x00 };
@@ -1301,10 +1299,10 @@ BOOL CMy0430MFCAppDlg::WriteIndicatorValueToPLC(int indicatorIndex)
         std::vector<BYTE> varName(varNameLen);
         memcpy(varName.data(), pszVarName, varNameLen);
 
-        // 8. 데이터 크기 (4 바이트에서 2 바이트로 변경 - WORD)
+        // 8. 데이터 크기 (2 바이트로 변경 - WORD)
         BYTE dataSize[2] = { 0x02, 0x00 };
 
-        // 9. 데이터 (측정값 - 32비트에서 16비트로 변경)
+        // 9. 데이터 (측정값 - 16비트로 변경)
         // XGT 프로토콜은 리틀 엔디안(최하위 바이트 먼저)을 사용
         BYTE data[2];
         data[0] = (indicator.measuredValue >> 0) & 0xFF;   // 최하위 바이트
@@ -1895,7 +1893,7 @@ void CMy0430MFCAppDlg::CreateDailyLogFile()
 
     // 프로그램 시작 로그 추가
     CString strLog;
-    strLog.Format(_T("프로그램 시작 - 버전 1.0 (%04d-%02d-%02d %02d:%02d:%02d)"),
+    strLog.Format(_T("프로그램 시작 - 버전 1.3.1 (%04d-%02d-%02d %02d:%02d:%02d)"),
         currentTime.GetYear(), currentTime.GetMonth(), currentTime.GetDay(),
         currentTime.GetHour(), currentTime.GetMinute(), currentTime.GetSecond());
 
@@ -1968,11 +1966,43 @@ void CMy0430MFCAppDlg::LimitLogItems()
     // 현재 로그 항목 수 확인
     int nCount = m_logList.GetCount();
 
+    // 현재 선택된 항목과 표시 위치 저장
+    int nTopIndex = m_logList.GetTopIndex();
+    bool bAtBottom = false;
+
+    // 현재 스크롤이 맨 아래에 있는지 확인
+    // 리스트박스의 높이를 기준으로 대략적으로 판단
+    CRect rect;
+    m_logList.GetClientRect(&rect);
+    int itemHeight = m_logList.GetItemHeight(0);
+    if (itemHeight > 0) {
+        int visibleItems = rect.Height() / itemHeight;
+        bAtBottom = (nTopIndex + visibleItems >= nCount);
+    }
+
     // 최대 항목 수를 초과하면 오래된 항목부터 삭제
     if (nCount > MAX_LOG_ITEMS) {
         int nDeleteCount = nCount - MAX_LOG_ITEMS;
         for (int i = 0; i < nDeleteCount; i++) {
             m_logList.DeleteString(0);  // 항상 가장 첫 번째 항목 삭제
+        }
+
+        // 삭제 후 이전 위치 복원 (삭제된 항목 수 고려)
+        if (bAtBottom) {
+            // 맨 아래에 있었으면 계속 맨 아래에 유지
+            int newCount = m_logList.GetCount();
+            // GetItemRect 또는 GetItemHeight를 사용하여 계산된 항목 수를 계산
+            CRect rect;
+            m_logList.GetClientRect(&rect);
+            int itemHeight = m_logList.GetItemHeight(0);
+            if (itemHeight > 0) {
+                int visibleItems = rect.Height() / itemHeight;
+                m_logList.SetTopIndex(newCount > visibleItems ? newCount - visibleItems : 0);
+            }
+        }
+        else {
+            // 스크롤 위치 조정 (삭제된 항목 수만큼)
+            m_logList.SetTopIndex(nTopIndex > nDeleteCount ? nTopIndex - nDeleteCount : 0);
         }
     }
 }
